@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bhshell"
+dynamic = ["version"]
+description = "Interactive shell for BloodHound"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "kr0no", email = "kr0no@ka0labs.net" }]
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+keywords = [
+    "bloodhound",
+    "bloodhound-ce",
+    "active-directory",
+    "attack-paths",
+    "cypher",
+    "pentest",
+    "red-team",
+    "security",
+    "cli",
+    "shell",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "cmd2>=4.3,<5",
+    "rich>=13.0",
+    "requests>=2.31",
+    "resvg-py>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/kr0no/bloodhound-shell"
+Issues = "https://github.com/kr0no/bloodhound-shell/issues"
+Author = "https://kr0no.me"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "responses>=0.25"]
+
+[project.scripts]
+bhshell = "bhshell.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "bhshell.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["bhshell*"]
+
+[tool.setuptools.package-data]
+bhshell = ["library/*.cyp"]
+
+[tool.ruff]
+line-length = 120

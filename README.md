@@ -1,0 +1,99 @@
+# bhshell
+
+[![PyPI version](https://img.shields.io/pypi/v/bhshell.svg)](https://pypi.org/project/bhshell/)
+[![Python versions](https://img.shields.io/pypi/pyversions/bhshell.svg)](https://pypi.org/project/bhshell/)
+[![CI](https://github.com/kr0no/bloodhound-shell/actions/workflows/ci.yml/badge.svg)](https://github.com/kr0no/bloodhound-shell/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/kr0no/bloodhound-shell/blob/main/LICENSE)
+
+An interactive command-line shell for BloodHound. Look up Active Directory objects,
+hunt for weaknesses and find attack paths from the terminal, without opening the web UI.
+
+## Installation
+
+Requires Python 3.11+ and a BloodHound CE v9 server (tested on v9.7.1).
+
+```bash
+pipx install bhshell     # recommended
+# or
+pip install bhshell
+```
+
+## Quick Start
+
+```console
+$ bhshell --url http://127.0.0.1:8080
+
+[bh: shell] > login -u admin
+[+] Logged in as admin on 127.0.0.1:8080
+
+[bh: shell] > hunt
+  Severity   Check            Count   Example              Description
+  critical   dcsync           2       SVC_SQL@CORP.LOCAL   Non-Tier-Zero principals with replication rights
+  high       kerberoastable   2       JDOE@CORP.LOCAL      Kerberoastable users
+  ...
+[*] Details: 'hunt CHECK' (e.g. 'hunt kerberoastable'), or 'hunt --all'.
+
+[bh: shell] > user CORP\svc_sql --all -o svc_sql.csv
+
+[bh: shell] > path --owned -g
+```
+
+The same commands run non-interactively for scripting: `bhshell -c "hunt --json" > hunt.json`.
+
+## What it does
+
+| Command | Shows |
+|---|---|
+| `user`, `computer`, `group`, `lookup` | Kerberoastable / AS-REP roastable, delegation, password age, Tier Zero and owned flags, plus group nesting, inbound/outbound ACL control, sessions and local admin rights |
+| `search` | Objects matching property filters (`search -t user hasspn enabled`), with dates, ages (`90d`) and wildcards |
+| `path` | Shortest paths to a target or to Tier Zero, from everything owned, or through `--via` steps; printed as hop chains, a terminal graph, or SVG/PNG for reports |
+| `hunt` | Domain-wide checks by severity: DCSync, control of Tier Zero, AD CS (ESC*), Kerberoasting, privileged sessions, LAPS/gMSA readers, passwords in attributes, takeover primitives (Shadow Credentials, RBCD), GPO control, NTLM relay, trusts, possible honeytokens...; `hunt --owned` limits them to what your owned objects can do |
+| `cypher`, `query` | Raw Cypher, and a library of saved queries: bundled, your own `.cyp` files (`~/.bhshell/queries/` or any folder set with `config query_dirs`) and those saved on the server |
+| `owned`, `hvt` | Mark or unmark owned and Tier Zero objects |
+| `domains`, `trusts` | Per-domain counts, and the trust map with SID filtering status |
+
+To add your own query, save it as a `.cyp` file in `~/.bhshell/queries/` and run it by name:
+
+```console
+$ cat ~/.bhshell/queries/stale-admins.cyp
+// description: Enabled adminCount users who have not logged on for a year
+MATCH (u:User) WHERE u.admincount = true AND u.enabled = true
+  AND u.lastlogontimestamp < (datetime().epochseconds - 31536000) RETURN u
+
+[bh: shell] > query run stale-admins -o stale-admins.csv
+```
+
+See [Query library](https://github.com/kr0no/bloodhound-shell/blob/main/docs/USAGE.md#query-library) for the format and for
+keeping queries in other folders (a team repository, one folder per engagement).
+
+Most commands take `--json` and `-o FILE` (JSON or CSV). Login works with a password (plus MFA) or
+an API token; secrets are prompted for or read from the environment, never passed as arguments.
+
+## Documentation
+
+The full usage guide (every command, view flag, search filter, path option, hunt check and
+configuration setting) is in [docs/USAGE.md](https://github.com/kr0no/bloodhound-shell/blob/main/docs/USAGE.md).
+Inside the shell, run `help` or `help <command>`.
+
+## Contributing
+
+Bug reports and pull requests are welcome at
+[github.com/kr0no/bloodhound-shell/issues](https://github.com/kr0no/bloodhound-shell/issues).
+
+```bash
+git clone https://github.com/kr0no/bloodhound-shell.git
+cd bloodhound-shell
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]'
+python -m pytest
+```
+
+The tests mock the BloodHound API with `responses`, so no BloodHound server is needed.
+
+## License
+
+Distributed under the MIT License. See
+[LICENSE](https://github.com/kr0no/bloodhound-shell/blob/main/LICENSE) for details.
+
+BloodHound is a trademark of SpecterOps. bhshell is an independent project and is not affiliated
+with or endorsed by SpecterOps.

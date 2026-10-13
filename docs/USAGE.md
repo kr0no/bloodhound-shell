@@ -1,0 +1,317 @@
+# bhshell usage guide
+
+Full reference for [bhshell](../README.md). Install instructions and a quick start are in the README.
+
+## Launching
+
+Launcher options: `--url URL`, `-k/--insecure` (skip TLS verification; persisted like `--url`, `tls on` re-enables it), `--no-resume`,
+`-c "CMD"` (repeatable, run commands and exit), `-s FILE` (run a script and exit), `--debug`.
+
+Results go to stdout; status messages, warnings and errors go to stderr, so
+`bhshell -c "hunt --json" > hunt.json` produces clean JSON. With `-c`/`-s` the exit code is
+1 if any command failed (error, usage error or unknown command), 0 otherwise.
+
+## Commands
+
+| Category | Command | Purpose |
+|---|---|---|
+| Connection | `url [URL]` | Show or set the backend (default `http://127.0.0.1:8080/`) |
+| | `tls [on\|off]` | TLS certificate verification |
+| | `login [-u USER] [--otp CODE]` | Username/password → JWT (prompts for TOTP if MFA is enabled) |
+| | `login --token [--token-id ID]` | API token (HMAC-signed requests) |
+| | `logout` | Invalidate the session and delete the cached token |
+| | `whoami` / `status` | Principal, roles, token expiry, server version, Cypher availability |
+| | `config [KEY [VALUE]]` | Show or change persisted settings |
+| Entities | `user NAME`, `computer NAME`, `group NAME`, `lookup NAME` | Triage summary + views |
+| | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
+| Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables |
+| Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
+| Analysis | `path SRC [DST] [--via X ...] [--exclude EDGE] [-g] [-p N]`, `path --owned [DST] [-g] [-p N]` | Attack paths: SRC → DST, SRC → Tier Zero, or everything owned → a target (Tier Zero by default); ordered by fewest actions |
+| | `hunt [CHECK ...] [--all] [--list] [--owned \| --from NAME]` | Domain-wide weakness checks (summary, or details per check), optionally limited to what owned objects can do |
+| | `domains`, `trusts` | Per-domain overview, and the trust map with SID-filtering status |
+| | `query list\|show\|run NAME` | Saved Cypher queries (bundled, your own `.cyp` files, server-saved); see [Query library](#query-library) |
+
+### Naming objects
+
+`NAME` accepts `jdoe`, `jdoe@corp.local`, `CORP\jdoe`, `WS01`, `WS01$`, `WS01.corp.local`, or a SID.
+`-d/--domain` restricts the domain. When a name exists in more than one domain the command stops and
+lists the candidates (domain + SID); re-run it with a qualified name.
+
+### Views
+
+With no view flags the **summary** is shown (Kerberoastable, AS-REP roastable, delegation, password
+age, last logon, Tier Zero/owned, ...; risky values are highlighted).
+
+| Flag | View |
+|---|---|
+| `-g, --groups` | Group memberships, direct and nested, with depth and the group it comes through |
+| `-m, --members` | Group members, direct and nested (groups only) |
+| `-O, --outbound` | Dangerous rights held over other objects (ACLs, credential access, delegation, ADCS, relay), direct or inherited through groups |
+| `-I, --inbound` | Principals holding dangerous rights over the object |
+| `-s, --sessions` | `HasSession` (user → computers, computer → users, group → members' sessions) |
+| `-p, --local-admin, --privs` | `AdminTo`, `CanRDP`, `ExecuteDCOM`, `CanPSRemote`, `SQLAdmin`; computers also list who has these rights on them, with group members unrolled |
+| `-a, --all` | Summary plus every applicable view |
+| `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). A per-right count line is always shown |
+| `--json` / `-o FILE.json\|.csv` | Raw JSON output / export (never capped by `--max-rows`) |
+
+Rows are coloured by edge severity. `T0` and `owned` mark Tier Zero and owned counterparts, so an
+owned principal with inbound control over a target stands out.
+
+### Searching by attribute
+
+`search` lists every object whose properties match all the filters given, as a table with the
+filtered properties as columns:
+
+```
+search -t user hasspn enabled                          # Kerberoastable candidates
+search -t user 'description~pass'                      # passwords in descriptions
+search -t computer operatingsystem~2012 -d CORP        # by OS, in one domain
+search -t user pwdneverexpires 'pwdlastset<2019-01-01' -c lastlogon -o old.csv
+search -t user enabled 'lastlogontimestamp<90d'        # enabled, no logon for 90 days
+search name=svc_* !enabled                             # any type, disabled svc_ accounts
+```
+
+| Filter | Meaning |
+|---|---|
+| `ATTR` / `!ATTR` | true / false or unset |
+| `ATTR=VALUE`, `ATTR!=VALUE` | equals / differs (`null` = unset) |
+| `ATTR~TEXT`, `ATTR!~TEXT` | contains / doesn't contain |
+| `ATTR<VALUE`, `>`, `<=`, `>=` | numbers, dates (`2020-01-01`) or ages (`90d` = 90 days ago) |
+
+Text comparisons ignore case, and `*` at the start or end of a value is a wildcard. Quote filters
+that contain spaces. `-t` takes any BloodHound type (`User`, `Computer`, `Group`, `OU`,
+`GPO`, `CertTemplate`, ...; default: any), `-c ATTR,...` adds columns, `-l N` caps the results
+fetched (default `max_results`, with a note when there are more) and `-n` the rows shown.
+`--json` prints every property of each match. For OR conditions or relationships, use `cypher`.
+
+## Analysis
+
+### Attack paths
+
+```
+path CORP\svc_sql 'domain admins@corp.local'             # shortest path (BloodHound's native pathfinder)
+path CORP\svc_sql                                        # all shortest paths to any Tier Zero object
+path --owned -o owned-paths.csv                          # from every owned object to Tier Zero
+path --owned 'file server 01'                            # from every owned object to another objective
+path CORP\svc_sql --via WS01 'domain admins@corp.local'  # through WS01 on the way
+path CORP\svc_sql --via WS01 --via 'it admins'           # several steps, then on to Tier Zero
+path CORP\svc_sql --exclude sessions --exclude relay     # ignore techniques you can't or won't use
+```
+
+`--via` steps are visited in the order given. Each leg is searched on its own and the results are
+chained, so every leg is a shortest path but the whole route may not be the shortest one through
+those steps. If a leg has no path, the route stops there with a note.
+
+`--owned` takes an optional destination: with none it heads for Tier Zero, with one for that
+objective (a file server, a database host, a target user).
+
+`--exclude EDGE` drops edges the search may not use, so the paths left are ones you can actually
+walk given the techniques available to you. It takes edge groups (`sessions` (`HasSession`, which
+is a point-in-time snapshot that may be gone), `acl`, `exec`, `delegation`, `adcs`, `relay`,
+`trusts`) repeat the flag for several. With `--exclude` the Cypher pathfinder is always used (the
+native one can't leave edges out).
+
+Disabled users and computers can't log on, so a path only goes through one when the hop reaching it
+grants the right to re-enable it: `GenericAll`, `GenericWrite`, `WriteAccountRestrictions`
+(includes `userAccountControl`), `Owns`, `WriteDacl` or `WriteOwner`, held directly or through a
+group. Such objects are marked `[disabled]`. Paths needing any other disabled object are skipped
+and the objects listed in a note; the search then finds the next-shortest path around them.
+`--include-disabled` turns this off. The source and an explicit destination are always allowed.
+
+Paths are printed as hop chains (`A ─GenericWrite→ B ─AddMember→ C [T0]`), coloured by edge severity,
+with a header line giving the number of paths, the shortest length, the fewest actions and the
+distinct first hops. Paths are ordered by the fewest *actions* first (hops the operator has to
+carry out, counting `MemberOf`, `Contains`, `GPLink` and `DCFor` as free since rights flow along
+them on their own) then by the fewest session-dependent hops, then by length. The shortest path is
+not always the quietest, so the one listed first is the one that asks the least of you.
+
+`-g/--graph` draws them as one graph instead, top to bottom, the way the BloodHound UI shows a
+pathfinding result: each object is a box (Tier Zero and owned ones marked, `--via` steps with a
+double border), each edge an arrow labelled with the right. Shared hops are drawn once, so branches
+and merges are easy to see. If the graph is wider than the terminal, the list is shown instead.
+
+When there are several paths, `-g` first prints the numbered list and asks which ones to draw
+(`2`, `1,3`, `2-4`; Enter draws them all). `-p/--pick N` makes the same choice without asking, and
+also narrows the list, `--json` and `-o`: `path --owned -g -p 2`. With `-c`/`-s` the shell never
+asks.
+
+```
+          ╭──────────────────╮
+          │ ● HELPDESK OWNED │
+          ╰─────────┬────────╯
+   ╭─ GenericWrite ─┤
+   │                ╰───────────╮ ForceChangePassword
+   ▼                            ▼
+╭───────────╮               ╭────────╮
+│ ● SVC_SQL │               │ ● JDOE │
+╰─────┬─────╯               ╰────┬───╯
+```
+Sources and targets can be users, computers, groups, domains, OUs or GPOs. Owned objects that are
+already Tier Zero are listed in a note.
+
+`-o FILE.svg` draws the paths shown (see `-n`) as one diagram for reports, with a legend and no
+title so the report can caption it. Word inserts SVG directly. The layout (horizontal, vertical
+or wrapped into rows) is picked to print as large as possible on a portrait page;
+`--svg-layout` forces one.
+
+`-o FILE.png` writes the same diagram as a PNG at twice the size (`--png-scale N`), tagged with
+a matching DPI so Word inserts it at the same size as the SVG.
+
+### Hunt checks
+
+`hunt` runs every check and prints a summary; `hunt CHECK ...` or `hunt --all` shows the rows.
+`-d DOMAIN` (FQDN or NetBIOS) scopes the checks, and `hunt --list` describes them.
+
+| Severity | Checks |
+|---|---|
+| critical | `dcsync` (replication rights outside Tier Zero), `tier-zero-control` (ACL, delegation, credential-read or execution rights on Tier Zero objects from outside it), `broad-rights` (Everyone / Anonymous / Authenticated Users / Domain Users / Domain Computers / Users / Pre-Windows 2000 Compatible Access with control or execution rights), `adcs` (ESC*, ESC8 relay, GoldenCert) |
+| high | `adcs-ca-control` (ESC7), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
+| medium | `constrained` (with protocol transition), `reenable`, `impersonable-admins`, `ntlm-hardening`, `stale-passwords` (`--days`, default 5 years), `pwd-not-required`, `legacy-os` |
+| low | `admincount-orphans`, `no-laps` |
+| info | `decoys` (possible honeytokens) |
+
+Notes on some checks:
+
+- `kerberoastable` and `asreproast` list first the users with a path to Tier Zero (one `allShortestPaths`
+  query, skipped above 500 users and in the summary), then those whose tickets use RC4 (`Enc types`).
+- `t0-sessions` lists Tier Zero or adminCount users logged on to computers outside Tier Zero:
+  where to dump credentials.
+- `passwords-in-attributes` reports `userPassword`, `unixUserPassword`, `unicodePwd` and
+  `msSFU30Password`, and descriptions containing *pass*, *pwd*, *mdp*, *contraseña*... (case-insensitive).
+- `impersonable-admins` lists Tier Zero users that are not marked sensitive and not in Protected
+  Users: the ones constrained delegation, RBCD and S4U can impersonate.
+- `relay` and `ntlm-hardening` rely on the NTLM properties SharpHound collects (`smbsigning`,
+  `webclientrunning`, `ldapsigning`, `ldapsepa`). Without them they report nothing.
+- `decoys` lists enabled users that look attractive (SPN, no pre-authentication, adminCount) but
+  have never logged on. Check them before roasting or using them.
+- `legacy-os` includes Windows 10 (end of support October 2025), except the LTSC/LTSB editions.
+
+#### From owned objects
+
+`hunt --owned` runs only the checks marked *scoped* in `hunt --list`, restricted to rights held by
+the owned objects and every group they belong to (the right is often held by a group). `hunt --from NAME`
+does the same from one object. Detailed tables get a `From` column with the owned objects behind
+each row, and `t0-sessions` becomes "computers where you can execute code that have a privileged
+session". Naming a check that is not scoped (`hunt kerberoastable --owned`) is an error.
+
+```console
+[bh: shell] > hunt --owned
+[bh: shell] > hunt tier-zero-control cred-readers --owned
+[bh: shell] > hunt --all --from CORP\helpdesk
+```
+
+When a check hits `max_results`, the summary shows the server-side total (`~9985`) from a
+`count()` query. For checks that drop Tier Zero objects (`unconstrained`, `admincount-orphans`,
+`no-laps`) the total excludes them too.
+
+### Domains and trusts
+
+`domains` lists every domain with its SID, functional level, user/computer counts (enabled in
+brackets), group and Tier Zero counts, and last collection time.
+
+`trusts` lists each trust as **Trusting (source) → Trusted (target)**: principals of the *trusted*
+domain can access the *trusting* one. The SID filtering column shows `enforced`, `DISABLED`,
+`unknown (default: enforced)` or `n/a (same forest)`. SID filtering is on by default for cross-forest
+trusts and off within a forest, so a missing property is not reported; only same-forest trusts, an
+explicit `spoofsidhistoryblocked = false`, or abuse edges are. The abuse edges BloodHound adds
+(`SpoofSIDHistory`, `AbuseTGTDelegation`) are listed against the trust they abuse.
+
+### Query library
+
+`query list` shows every saved query, `query show NAME` prints one and `query run NAME` runs it
+(with `--json` and `-o FILE` like `cypher`). Queries come from four places; when two share a name,
+the later one wins:
+
+1. **Bundled**: the queries shipped in `bhshell/library/`.
+2. **Your own**: `~/.bhshell/queries/*.cyp` (or `$BHSHELL_HOME/queries/`).
+3. **Extra folders**: the folders listed in `config query_dirs`, in order.
+4. **The server**: queries saved in the BloodHound UI, listed as `server:<name>`.
+
+#### Adding your own queries
+
+Save each query in its own `.cyp` file in `~/.bhshell/queries/` (create the folder if it does not
+exist):
+
+```
+// name: stale-admins
+// description: Enabled adminCount users who have not logged on for a year
+MATCH (u:User)
+WHERE u.admincount = true AND u.enabled = true AND u.lastlogontimestamp < (datetime().epochseconds - 31536000)
+RETURN u
+```
+
+* The `// name:` and `// description:` header lines are optional. Without a name, the file name is
+  used (`stale-admins.cyp` → `stale-admins`). The description is shown by `query list`.
+* The query must return **nodes or paths** (`RETURN u`, `RETURN p`), not scalars such as
+  `count(u)` or `u.name`: bhshell renders the graph BloodHound sends back.
+* Queries are picked up on the next `query` command, with no restart. Tab completion lists them
+  after `query show` and `query run`.
+* A file with the same name as a bundled query replaces it.
+
+Test a query first with `cypher -f my-query.cyp`, which runs a file without saving it.
+
+#### Keeping queries in other folders
+
+To use queries from a folder of your own (a team repository, a folder per engagement, ...), list
+it in the `query_dirs` setting. Separate several folders with `:` (`;` on Windows), as in `PATH`:
+
+```
+config query_dirs ~/git/team-queries:~/engagements/acme/queries
+config query_dirs ''                 # back to the default (no extra folders)
+```
+
+Only the `.cyp` files directly inside each folder are loaded (not subfolders). A folder that does not
+exist is reported in a note under `query list`.
+
+## How it works
+
+```
+bhshell/cli.py          command-line options
+bhshell/client/         HTTP transport: JWT and HMAC auth, retries, error mapping, pagination
+bhshell/models/         Node/Edge/Graph, User/Computer/Group summaries, view results
+bhshell/queries/        Cypher templates, edge taxonomy, and the logic behind each command
+bhshell/render/         rich tables and panels, path graphs, SVG/PNG, JSON/CSV export
+bhshell/shell/          the cmd2 app and one command set per area
+```
+
+Everything goes through `POST /api/v2/graphs/cypher`. If Cypher is disabled, the views fall back
+to the per-entity REST endpoints, which can't tell ACL rights apart (they all show as `Controls`).
+
+Rights are queried per severity, each with its own `LIMIT max_results`, so a flood of low-impact
+edges can't push `GetChangesAll` out of the result. When a query hits the limit, the shell asks
+the server for the real total and says so in a note.
+
+A 401 logs the shell out and deletes the cached token (the prompt turns red). Only GET/PUT/DELETE
+are retried; a slow Cypher query runs once and fails after `read_timeout`.
+
+## Files and security
+
+Stored in `~/.bhshell/` (override with `BHSHELL_HOME`):
+
+* `config.toml` holds the URL, TLS setting, timeouts, `page_size`, `max_results` (path cap per
+  query), `display_rows` (table rows per view), `query_dirs` (extra query folders) and the last
+  username. Values are validated:
+  timeouts, `page_size` and `max_results` must be at least 1, `display_rows` at least 0 (0 = all).
+* `session.json` holds the cached JWT (mode `0600`), resumed at startup if it is still valid. Set
+  `config cache_session false` to disable this.
+* `history` is the command history.
+* `queries/` holds your own `.cyp` queries (see [Query library](#query-library)).
+* CSV exports prefix cells starting with `=`, `+`, `-` or `@` with `'`. AD data such as descriptions
+  and GPO names is attacker-controlled and could otherwise run as a spreadsheet formula. Names are
+  also never interpreted as terminal markup.
+
+Passwords and API keys are never accepted as arguments, so they never end up in history. They are
+prompted for, or read from `BH_PASSWORD`, `BH_TOKEN_ID` and `BH_TOKEN_KEY`.
+
+cmd2 output redirection (`>`, `|`) is **disabled**, because Cypher uses those characters and a query
+could otherwise be piped to a system shell. Use `-o FILE` instead.
+
+## Compatibility
+
+bhshell targets BloodHound CE v9 and is tested against v9.7.1. It relies on the `Tag_Tier_Zero`
+and `Tag_Owned` kinds and on the privilege-zone (`asset-group-tags`) API, so releases before
+privilege zones are not supported.
+
+`owned add` / `hvt add` create a selector named `bhshell: <object>` in the Owned label or the
+Tier Zero tier. `remove` only deletes selectors seeded with that object alone, so nothing else
+gets unmarked. Changes show up after BH's next analysis run.

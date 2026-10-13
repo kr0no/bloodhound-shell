@@ -1,0 +1,3 @@
+graft tests
+graft docs
+global-exclude __pycache__ *.py[cod]

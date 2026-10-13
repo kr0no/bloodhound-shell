@@ -1,0 +1,56 @@
+# --- bhshell output: real Active Directory data, never commit ---------------
+# Exports written with -o (JSON / CSV / SVG / PNG). Example images for the
+# docs can still be added under docs/.
+*.json
+*.csv
+*.svg
+*.png
+!docs/**
+# A BHSHELL_HOME pointed inside the repo (config, cached JWT, command history).
+.bhshell/
+session.json
+
+# --- Secrets ----------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+.pypirc
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# Test, coverage and lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- Editors and OS ---------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
