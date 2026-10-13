@@ -1,7 +1,7 @@
 # bhshell
 
-[![PyPI version](https://img.shields.io/pypi/v/bhshell.svg)](https://pypi.org/project/bhshell/)
-[![Python versions](https://img.shields.io/pypi/pyversions/bhshell.svg)](https://pypi.org/project/bhshell/)
+![PyPI Status](https://img.shields.io/pypi/status/bhshell)
+[![PyPI version](https://img.shields.io/pypi/v/bhshell)](https://pypi.org/project/bhshell/)
 [![CI](https://github.com/kr0no/bloodhound-shell/actions/workflows/ci.yml/badge.svg)](https://github.com/kr0no/bloodhound-shell/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/kr0no/bloodhound-shell/blob/main/LICENSE)
 
