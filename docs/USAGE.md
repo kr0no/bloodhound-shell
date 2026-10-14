@@ -481,7 +481,9 @@ Everything goes through `POST /api/v2/graphs/cypher`. If Cypher is disabled, the
 to the per-entity REST endpoints, which can't tell ACL rights apart (they all show as `Controls`).
 The OU tree and the applied GPOs have no REST equivalent; without Cypher, `ou` shows the counts,
 the objects below an OU and the GPOs linked to it or above it, and `gpo` shows BloodHound's own
-counts and list of the objects a GPO applies to.
+counts and list of the objects a GPO applies to. `domains` lists the domains with their user,
+computer and group counts (enabled and Tier Zero counts need Cypher); `trusts`, `search`, `hunt` and
+`path` to Tier Zero need Cypher.
 
 Rights are queried per severity, each with its own `LIMIT max_results`, so a flood of low-impact
 edges can't push `GetChangesAll` out of the result. When a query hits the limit, the shell asks

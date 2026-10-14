@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from bhshell.errors import NotFoundError
+from bhshell.errors import CypherDisabledError, NotFoundError, UnsupportedFeature
 from bhshell.models.entities import TIER_ZERO_LABEL, Graph, Node, opt_bool
 from bhshell.queries import cypher as Q
 from bhshell.queries.edges import TRUST_ABUSE_EDGES, TRUST_EDGES
 from bhshell.queries.service import EntityService
 
 TRUSTS_QUERY = "MATCH p=(a:Domain)-[r]->(b:Domain) RETURN p"
+REST_DOMAINS_NOTE = "Cypher is unavailable: enabled and Tier Zero counts need it."
 
 
 @dataclass
@@ -91,17 +92,23 @@ class DomainService:
     def __init__(self, entities: EntityService) -> None:
         self.entities = entities
         self.client = entities.client
+        self.notes: list[str] = []
 
     def domains(self) -> list[DomainInfo]:
-        nodes = {n.objectid: n for n in self.entities.run_cypher("MATCH (n:Domain) RETURN n").nodes.values()}
-        infos: list[DomainInfo] = []
         try:
             listed = (self.client.get("api/v2/available-domains") or {}).get("data") or []
         except NotFoundError:
             listed = []
+        try:
+            nodes = {n.objectid: n for n in self.entities.run_cypher("MATCH (n:Domain) RETURN n").nodes.values()}
+        except CypherDisabledError:
+            self.notes.append(REST_DOMAINS_NOTE)
+            return sorted((self._rest_info(item) for item in listed if _active_directory(item)),
+                          key=lambda d: d.name)
+        infos: list[DomainInfo] = []
         seen: set[str] = set()
         for item in listed:
-            if item.get("type", "active-directory") != "active-directory":
+            if not _active_directory(item):
                 continue
             sid = item.get("id", "")
             seen.add(sid)
@@ -129,8 +136,32 @@ class DomainService:
         }
         return info
 
+    def _rest_info(self, item: dict[str, Any]) -> DomainInfo:
+        """A domain from the REST API: the domain entity carries its object counts."""
+        sid = item.get("id", "")
+        info = DomainInfo(name=item.get("name", sid), sid=sid, collected=item.get("collected"))
+        try:
+            data = (self.client.get(f"api/v2/domains/{sid}", counts="true") or {}).get("data") or {}
+        except NotFoundError:
+            return info
+        props = data.get("props") or {}
+        info.functional_level = str(props.get("functionallevel") or "")
+        info.last_collected = str(props.get("lastcollected") or props.get("lastseen") or "")[:19]
+        info.counts = {"users": data.get("users"), "enabled_users": None, "computers": data.get("computers"),
+                       "enabled_computers": None, "groups": data.get("groups"), "tier_zero": None}
+        return info
+
     def _count(self, match: str, *conditions: str) -> int | None:
         return self.entities.count(f"MATCH {match}{Q.where(*conditions)} RETURN count(n)")
 
     def trusts(self) -> list[TrustInfo]:
-        return trusts_from_graph(self.entities.run_cypher(TRUSTS_QUERY))
+        # The REST API lists trusted domains, transitive ones included, but not the trusts' properties.
+        try:
+            return trusts_from_graph(self.entities.run_cypher(TRUSTS_QUERY))
+        except CypherDisabledError as exc:
+            raise UnsupportedFeature("'trusts' needs the Cypher endpoint") from exc
+
+
+def _active_directory(item: dict[str, Any]) -> bool:
+    """An Active Directory domain of `available-domains` (Azure tenants are listed there too)."""
+    return item.get("type", "active-directory") == "active-directory"

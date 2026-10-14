@@ -43,14 +43,15 @@ class DomainCommands(BaseCommands):
         """Per-domain overview."""
         app = self.app
         app.require_auth()
-        infos = DomainService(app.entities).domains()
+        service = DomainService(app.entities)
+        infos = service.domains()
         rows = [d.as_dict() for d in infos]
         if args.json:
             app.poutput(export.to_json(rows))
         else:
             display = [{**r, "users_fmt": _pair(r["users"], r["enabled_users"]),
                         "computers_fmt": _pair(r["computers"], r["enabled_computers"])} for r in rows]
-            app.ui.table("Domains", DOMAIN_COLS, display)
+            app.ui.table("Domains", DOMAIN_COLS, display, notes=service.notes)
         if args.output:
             fields = list(rows[0]) if rows else ["name"]
             self.export(args.output, rows, (fields, rows))

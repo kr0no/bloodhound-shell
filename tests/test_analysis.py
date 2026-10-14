@@ -9,6 +9,7 @@ import pytest
 import responses
 
 from bhshell.client.client import BHClient
+from bhshell.errors import UnsupportedFeature
 from bhshell.models.entities import Graph
 from bhshell.queries.domains import DomainService, trusts_from_graph
 from bhshell.queries.hunt import CHECKS, CHECKS_BY_ID, HuntOptions, HuntService
@@ -216,6 +217,22 @@ def test_domains_overview(client: BHClient, mocked: responses.RequestsMock) -> N
     assert [d.name for d in infos] == ["CORP.LOCAL", "DEV.CORP.LOCAL"]
     assert infos[0].functional_level == "2016" and infos[0].collected is True
     assert infos[0].counts["users"] == 7
+
+
+def test_domains_overview_without_cypher(client: BHClient, mocked: responses.RequestsMock) -> None:
+    mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
+    mocked.add(responses.GET, f"{BASE}api/v2/available-domains", json={"data": [
+        {"type": "active-directory", "name": "CORP.LOCAL", "id": "S-1-5-21-1000", "collected": True},
+        {"type": "azure", "name": "CORP TENANT", "id": "tenant-id", "collected": True}]})
+    mocked.add(responses.GET, f"{BASE}api/v2/domains/S-1-5-21-1000", json={"data": {
+        "users": 7, "computers": 2, "groups": 40, "props": {"functionallevel": "2016"}}})
+    service = DomainService(EntityService(client))
+    (info,) = service.domains()
+    assert (info.name, info.functional_level, info.counts["users"], info.counts["enabled_users"]) == (
+        "CORP.LOCAL", "2016", 7, None)
+    assert service.notes and "Tier Zero" in service.notes[0]
+    with pytest.raises(UnsupportedFeature, match="'trusts' needs the Cypher endpoint"):
+        service.trusts()
 
 
 def test_count_returns_none_without_literals(client: BHClient, mocked: responses.RequestsMock) -> None:
