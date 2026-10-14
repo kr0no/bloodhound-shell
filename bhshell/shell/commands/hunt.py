@@ -110,7 +110,8 @@ class HuntCommands(BaseCommands):
         elif not detail:
             app.ui.hunt_summary(findings)
             flag = " --owned" if args.owned else f" --from {args.source}" if args.source else ""
-            example = "tier-zero-control" if flag else "kerberoastable"
+            example = next((f.check.id for f in findings if f.rows),
+                           "tier-zero-control" if flag else "kerberoastable")
             app.ui.info(f"Details: 'hunt CHECK{flag}' (e.g. 'hunt {example}{flag}'), or 'hunt --all{flag}'.")
         else:
             max_rows = self.max_rows(args)

@@ -55,6 +55,7 @@ WINDOWS_10 = "WINDOWS 10"
 LTSC = ("LTSC", "LTSB")
 PROTECTED_USERS_RID = "-525"
 DCSYNC_EDGES = ("DCSync", "GetChanges", "GetChangesAll")
+ERODC_RID = "-498"
 ESC8_EDGE = "CoerceAndRelayNTLMToADCS"
 ADCS_ABUSE_EDGES = frozenset(k for k in ADCS_EDGES if k.startswith("ADCSESC")) | {"GoldenCert", ESC8_EDGE}
 BROAD_RIGHT_EDGES = (CONTROL_EDGES | EXEC_EDGES) - {"Enroll"}
@@ -257,6 +258,8 @@ def _dcsync_rows(g: Graph, _: HuntOptions) -> list[Row]:
             by_principal.setdefault((e.source, e.target), set()).add(e.kind)
     rows = []
     for (src, dst), rights in by_principal.items():
+        if rights == {"GetChanges"} and g.nodes[src].objectid.endswith(ERODC_RID):
+            continue
         full = "DCSync" in rights or {"GetChanges", "GetChangesAll"} <= rights
         rows.append(node_row(g.nodes[src], rights=", ".join(sorted(rights)), target=g.nodes[dst].name,
                              full_dcsync=full))

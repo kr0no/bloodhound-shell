@@ -152,6 +152,22 @@ def test_password_rows_skip_known_false_positives() -> None:
     assert [r["name"] for r in rows] == ["C@CORP.LOCAL"]
 
 
+def test_dcsync_rows_skip_the_default_erodc_right() -> None:
+    nodes = {"erodc": node("Group", "S-1-5-21-1-498", "ENTERPRISE READ-ONLY DOMAIN CONTROLLERS@CORP.LOCAL"),
+             "some": node("Group", "S-1-5-21-1-1500", "SOMECHANGES@CORP.LOCAL"),
+             "d": node("Domain", "S-1-5-21-1", "CORP.LOCAL", t0=True)}
+    rows = CHECKS_BY_ID["dcsync"].rows(g(nodes, [("erodc", "GetChanges", "d"), ("some", "GetChanges", "d")]),
+                                       HuntOptions())
+    assert [(r["name"], r["full_dcsync"]) for r in rows] == [("SOMECHANGES@CORP.LOCAL", False)]
+
+
+def test_summary_hint_names_a_check_with_findings(shell: BHShell) -> None:
+    run(shell, "login -u admin")
+    out = run(shell, "hunt")
+    hint = next(line for line in out.splitlines() if "Details:" in line)
+    assert "e.g. 'hunt dcsync'" in hint
+
+
 def test_takeover_rows_name_the_technique() -> None:
     nodes = {"a": node("User", "A", "A@CORP.LOCAL"), "b": node("User", "B", "B@CORP.LOCAL", admincount=True),
              "c": node("Computer", "C", "C.CORP.LOCAL")}
