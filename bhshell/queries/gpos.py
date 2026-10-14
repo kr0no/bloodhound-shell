@@ -18,6 +18,7 @@ from bhshell.queries.containers import (
     GPO_CAVEAT,
     GPO_TARGET_KINDS,
     Counts,
+    dn_location,
     is_container,
     location_below,
     rest_unavailable,
@@ -33,7 +34,7 @@ NOT_LINKED = ("BloodHound has no links for this GPO: it is not linked anywhere, 
 
 FLAGS = [Column("T0", "tier_zero", "t0"), Column("Owned", "owned", "owned")]
 LINK_COLS = [
-    Column("Linked to", "linked_to"), Column("Type", "kind", "kind"), Column("Enforced", "enforced", "bool"),
+    Column("Linked to", "location"), Column("Type", "kind", "kind"), Column("Enforced", "enforced", "bool"),
     Column("Users (enabled)", "users"), Column("Computers (enabled)", "computers"),
     Column("T0 affected", "tier_zero_affected"), Column("Owned affected", "owned_affected"),
     Column("Blocked at", "blocked_at"), *FLAGS,
@@ -198,7 +199,7 @@ class GPOService:
                     total = sum((counts.get(oid, Counts()) for oid in link.reached), Counts())
                 target = link.target
                 view.rows.append(GPOTargetRow(
-                    linked_to=target.name, kind=target.kind, enforced=link.enforced,
+                    linked_to=target.name, kind=target.kind, location=dn_location(target), enforced=link.enforced,
                     users=total and total.users, enabled_users=total and total.enabled_users,
                     computers=total and total.computers, enabled_computers=total and total.enabled_computers,
                     tier_zero_affected=total and total.tier_zero_targets,

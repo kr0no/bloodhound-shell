@@ -111,6 +111,8 @@ class GPOLinkRow(Row):
     gpo: str
     linked_to: str
     linked_kind: str
+    # Where the linked domain or OU sits (`CORP.LOCAL/SERVERS/WEB`): OU names repeat across a domain.
+    location: str = ""
     enforced: bool | None = None
     # `None` when unknown (REST fallback).
     applies: bool | None = True
@@ -138,6 +140,7 @@ class GPOTargetRow(Row):
 
     linked_to: str
     kind: str
+    location: str = ""
     enforced: bool | None = None
     users: int | None = None
     enabled_users: int | None = None

@@ -17,6 +17,7 @@ from bhshell.queries.containers import (
     NO_TREE_DATA,
     Counts,
     applied_gpos,
+    dn_location,
     parent_dn,
     short_name,
     stale_contains,
@@ -390,6 +391,24 @@ def test_gpo_rest_fallback_uses_bloodhound_lists() -> None:
         links, affected = report.views
         assert not links.rows and "needs Cypher" in links.notes[-1]
         assert [r.name for r in affected.rows] == ["WEB01.CORP.LOCAL"]
+
+
+def test_dn_location_reads_the_dn_from_the_domain_down() -> None:
+    web = Node.from_cypher("w", NODES["w"])
+    assert dn_location(web) == "CORP.LOCAL/SERVERS/WEB"
+    assert dn_location(Node.from_cypher("d", NODES["d"])) == "CORP.LOCAL"
+    odd = Node.from_cypher("x", node("x", "OU", "A@CORP.LOCAL", "OU=A\\, B,DC=CORP,DC=LOCAL"))
+    assert dn_location(odd) == "CORP.LOCAL/A, B"
+    assert dn_location(Node.from_cypher("g", NODES["ddp"])) == "DEFAULT DOMAIN POLICY@CORP.LOCAL"  # no DN
+
+
+def test_gpo_rows_say_where_each_link_sits() -> None:
+    levels = [Node.from_cypher(k, NODES[k]) for k in ("d", "s", "w")]
+    g = _gpo_graph([*DOMAIN_LINKS, ("webgpo", "GPLink", "w"), ("ddp", "GPLink", "w")], LINK_PROPS)
+    rows = {(r.gpo.split("@")[0], r.location): r for r in applied_gpos(levels, g)}
+    assert ("WEB HARDENING", "CORP.LOCAL/SERVERS/WEB") in rows
+    assert rows[("DEFAULT DOMAIN POLICY", "CORP.LOCAL/SERVERS/WEB")].reason == (
+        "duplicate: already applied through CORP.LOCAL")
 
 
 def test_parent_dn_skips_escaped_commas() -> None:

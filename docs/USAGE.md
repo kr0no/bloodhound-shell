@@ -152,6 +152,8 @@ stops at `max_results` objects, with a note giving the server's real total; rais
 `-G` follows the OU chain from the domain down to the object (or to the explored OU, for `ou`)
 and evaluates each GPO link on it the way Windows does:
 
+* **Linked to** is where the link sits, from the domain down (`CORP.LOCAL/SERVERS/WEB`): OU names
+  such as `Users` often repeat within a domain. `--json` and `-o` also give the OU's name.
 * An OU that **blocks inheritance** stops the GPOs linked above it, unless the link is
   **enforced**. Such links are listed as `no (inheritance blocked at SERVERS)`.
 * Rows are in **precedence** order, the first one winning when two GPOs set the same thing:

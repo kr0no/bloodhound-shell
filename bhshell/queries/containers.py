@@ -7,6 +7,7 @@ edge). Both come from SharpHound's Container collection: a domain collected with
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
@@ -43,7 +44,7 @@ CONTENT_COLS = [
     Column("Location", "location", "via"), Column("Depth", "depth", "depth"), *FLAGS,
 ]
 GPO_COLS = [
-    Column("GPO", "gpo"), Column("Linked to", "linked_to"), Column("Enforced", "enforced", "bool"),
+    Column("GPO", "gpo"), Column("Linked to", "location"), Column("Enforced", "enforced", "bool"),
     Column("Applies", "applies"), Column("Editable by (outside Tier Zero)", "editable_by"), *FLAGS,
 ]
 
@@ -66,6 +67,16 @@ def short_name(node: Node) -> str:
         rdn = dn.split("=", 1)[1]
         return rdn[:_rdn_end(rdn)].replace("\\,", ",")
     return node.name.rsplit("@", 1)[0]
+
+
+def dn_location(node: Node) -> str:
+    """`CORP.LOCAL/SERVERS/WEB` for `OU=WEB,OU=SERVERS,DC=CORP,DC=LOCAL`; the name when there is no DN."""
+    parts = [p for p in re.split(r"(?<!\\),", str(node.properties.get("distinguishedname") or "")) if "=" in p]
+    domain = ".".join(p.split("=", 1)[1] for p in parts if p.upper().startswith("DC="))
+    if not domain:
+        return node.name
+    names = [p.split("=", 1)[1].replace("\\,", ",") for p in parts if not p.upper().startswith("DC=")]
+    return "/".join([domain.upper(), *reversed(names)])
 
 
 def parent_dn(dn: str) -> str:
@@ -193,7 +204,8 @@ def applied_gpos(levels: list[Node], graph: Graph) -> list[GPOLinkRow]:
         blocker = next((n for n in levels[level + 1:] if n.properties.get("blocksinheritance") is True), None)
         applies = bool(enforced) or blocker is None
         found.append((level, GPOLinkRow(
-            gpo=gpo.name, linked_to=target.name, linked_kind=target.kind, enforced=enforced, applies=applies,
+            gpo=gpo.name, linked_to=target.name, linked_kind=target.kind, location=dn_location(target),
+            enforced=enforced, applies=applies,
             reason="" if applies or blocker is None else f"inheritance blocked at {short_name(blocker)}",
             tier_zero=gpo.tier_zero, owned=gpo.owned, objectid=gpo.objectid,
         )))
@@ -208,7 +220,7 @@ def applied_gpos(levels: list[Node], graph: Graph) -> list[GPOLinkRow]:
     first: dict[str, GPOLinkRow] = {}
     for row in rows:
         if row.applies and first.setdefault(row.objectid, row) is not row:
-            row.reason = f"duplicate: already applied through {first[row.objectid].linked_to}"
+            row.reason = f"duplicate: already applied through {first[row.objectid].location}"
     return rows
 
 
