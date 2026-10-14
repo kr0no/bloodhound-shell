@@ -25,6 +25,7 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 | Entities | `user NAME`, `computer NAME`, `group NAME`, `lookup NAME` | Triage summary + views |
 | | `ou NAME [-t] [-c] [-G] [-I]` | OUs, containers and domains: tree, objects below, applied GPOs, inbound control; see [Exploring OUs](#exploring-ous) |
 | | `gpo NAME [-l] [-c] [-I]` | GPOs: links, the users and computers they apply to, who can edit them; see [Exploring GPOs](#exploring-gpos) |
+| | `ca NAME [-t] [-I]`, `template NAME [-I]` | AD CS: Enterprise CAs and certificate templates; see [Exploring AD CS](#exploring-ad-cs) |
 | | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
 | Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables |
 | Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
@@ -227,6 +228,54 @@ The list stops at `max_results` objects, with a note giving the server's real to
 Cypher, the summary counts and the `-c` list come from BloodHound's REST endpoints (so they
 include those extra objects, and have no location), and `-l` is not available.
 
+### Exploring AD CS
+
+`ca NAME` shows an Enterprise CA and `template NAME` a certificate template. `hunt adcs` lists the
+ESC edges BloodHound found; these two commands show the CA and the template behind a finding, and
+what a template allows when BloodHound found no edge. `NAME` is the name BloodHound shows
+(`CORP-CA@corp.local`, `USER@corp.local`; for templates the short name, not the display name), the
+distinguished name or the object ID. `search -t EnterpriseCA` and `search -t CertTemplate` list
+them.
+
+```
+ca CORP-CA@corp.local                              # summary
+ca CORP-CA@corp.local -t                           # published templates and their ESC conditions
+template USER@corp.local                           # one template
+template WEBSERVER@corp.local -I                   # everyone with rights over it, Tier Zero included
+```
+
+| Flag | View |
+|---|---|
+| `ca` (none) | Summary: CA name and host name, user-specified SAN (`EDITF_ATTRIBUTESUBJECTALTNAME2`, ESC6), role separation, enrollment agent restrictions, web enrollment endpoints and whether they can be relayed to (ESC8), the computer hosting the CA and its admins outside Tier Zero (an admin of the host can forge certificates), whether the CA is trusted for NT authentication, the CA that issued its certificate, the published templates that meet ESC conditions, and who outside Tier Zero can enroll on it or manage it (`ManageCA`, `ManageCertificates`: ESC7) |
+| `ca -t, --templates` | Every published template: schema version, whether its certificates can log on, whether the enrollee supplies the subject, manager approval, authorized signatures, the ESC conditions it meets and who outside Tier Zero can enroll in it. Templates that meet a condition and that someone can enroll in come first |
+| `template` (none) | Summary: schema version, effective EKUs by name, authentication, enrollee-supplied subject, manager approval, authorized signatures, no security extension, validity, the CAs publishing it, the ESC conditions it meets, and who outside Tier Zero can enroll in it or rewrite it |
+| `-I, --inbound` | Principals with rights over it (`Enroll`, `ManageCA`, `GenericAll`, ...), Tier Zero included |
+| `-a, --all` | Summary plus every view |
+| `-d`, `-n`, `--json`, `-o FILE` | As for the other entity commands |
+
+The ESC conditions come from the template's settings. All but ESC4 need a certificate issued
+without a manager's approval or an authorized signature (schema version 1 ignores signatures):
+
+| Technique | Template condition |
+|---|---|
+| ESC1 | Logon certificate (Client Authentication, PKINIT, Smart Card Logon, Any Purpose or no EKU) and the enrollee supplies the subject |
+| ESC2 | Any Purpose EKU, or no EKU |
+| ESC3 | Certificate Request Agent EKU: an enrollment agent template |
+| ESC4 | Someone outside Tier Zero can rewrite it (`GenericAll`, `GenericWrite`, `WriteDacl`, `WriteOwner`, `Owns`, `WritePKIEnrollmentFlag`, `WritePKINameFlag`) |
+| ESC9 | Logon certificate without the security extension (`CT_FLAG_NO_SECURITY_EXTENSION`) |
+| ESC13 | One of its issuance policies is linked to a group (`OIDGroupLink`) |
+| ESC15 | Schema version 1 and the enrollee supplies the subject (CVE-2024-49019, fixed by the November 2024 update) |
+
+A setting that was not collected never counts. A condition met is not an attack yet: the principal
+must also be able to enroll in the template and on a CA that publishes it, and logon certificates
+need a CA trusted for NT authentication. BloodHound checks all of that before adding an ESC edge.
+It has no edge for ESC2 and ESC15, so `hunt adcs-templates` lists the templates open to them.
+
+CA settings read from the CA host's registry show `not collected` when SharpHound could not read
+them. ESC11 and ESC16 depend on CA settings BloodHound does not collect. Without Cypher, `ca` and
+`template` show the object's own properties and `-I` falls back to REST; the ESC conditions, CAs and
+enrollment rights need Cypher.
+
 ## Analysis
 
 ### Attack paths
@@ -308,7 +357,7 @@ a matching DPI so Word inserts it at the same size as the SVG.
 | Severity | Checks |
 |---|---|
 | critical | `dcsync` (replication rights outside Tier Zero), `tier-zero-control` (ACL, delegation, credential-read or execution rights on Tier Zero objects from outside it), `broad-rights` (Everyone / Anonymous / Authenticated Users / Domain Users / Domain Computers / Users / Pre-Windows 2000 Compatible Access with control or execution rights), `adcs` (ESC*, ESC8 relay, GoldenCert) |
-| high | `adcs-ca-control` (ESC7), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
+| high | `adcs-ca-control` (ESC7), `adcs-templates` (ESC2, ESC15), `adcs-pki-control` (ESC4, ESC5), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD, ESC14), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
 | medium | `constrained` (with protocol transition), `reenable`, `impersonable-admins`, `ntlm-hardening`, `stale-passwords` (`--days`, default 5 years), `pwd-not-required`, `legacy-os` |
 | low | `admincount-orphans`, `no-laps` |
 | info | `decoys` (possible honeytokens) |
@@ -328,6 +377,12 @@ Notes on some checks:
 - `decoys` lists enabled users that look attractive (SPN, no pre-authentication, adminCount) but
   have never logged on. Check them before roasting or using them.
 - `legacy-os` includes Windows 10 (end of support October 2025), except the LTSC/LTSB editions.
+- `adcs-templates` lists the published templates that principals outside Tier Zero can enroll in
+  and that meet the ESC2 or ESC15 conditions (see [Exploring AD CS](#exploring-ad-cs)). Enrollment
+  rights on the CA are not checked.
+- `adcs-pki-control` lists write and ownership rights from outside Tier Zero over certificate
+  templates (ESC4) and over CA, root CA, AIA CA, NTAuth store and issuance policy objects (ESC5).
+  BloodHound only adds an `ADCSESC4` edge when the rest of the chain holds.
 
 #### From owned objects
 
@@ -411,7 +466,7 @@ exist is reported in a note under `query list`.
 ```
 bhshell/cli.py          command-line options
 bhshell/client/         HTTP transport: JWT and HMAC auth, retries, error mapping, pagination
-bhshell/models/         Node/Edge/Graph, User/Computer/Group/OU/GPO summaries, view results
+bhshell/models/         Node/Edge/Graph, summaries per object type, view results
 bhshell/queries/        Cypher templates, edge taxonomy, and the logic behind each command
 bhshell/render/         rich tables and panels, path graphs, SVG/PNG, JSON/CSV export
 bhshell/shell/          the cmd2 app and one command set per area

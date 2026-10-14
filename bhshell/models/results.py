@@ -44,6 +44,12 @@ def _with_enabled(total: int, enabled: int) -> str:
     return f"{total} ({enabled})" if total else "0"
 
 
+def _shorten(names: list[str], keep: int = 3) -> list[str]:
+    """The first `keep` names, and how many more there are."""
+    shown = names[:keep]
+    return [*shown, f"+{len(names) - keep} more"] if len(names) > keep else shown
+
+
 def _show_enabled(out: dict[str, Any]) -> dict[str, Any]:
     """`users` and `computers` as "total (enabled)"."""
     for key in ("users", "computers"):
@@ -122,10 +128,7 @@ class GPOLinkRow(Row):
             out["applies"] = None
         else:
             out["applies"] = ("yes" if self.applies else "no") + (f" ({self.reason})" if self.reason else "")
-        shown = self.editable_by[:3]
-        if len(self.editable_by) > len(shown):
-            shown = [*shown, f"+{len(self.editable_by) - len(shown)} more"]
-        out["editable_by"] = shown
+        out["editable_by"] = _shorten(self.editable_by)
         return out
 
 
@@ -151,6 +154,30 @@ class GPOTargetRow(Row):
 
     def as_display(self) -> dict[str, Any]:
         return _show_enabled(asdict(self))
+
+
+@dataclass
+class TemplateRow(Row):
+    """A certificate template published to a CA (`templates` view)."""
+
+    name: str
+    schema_version: int | None = None
+    authentication: bool | None = None
+    enrollee_supplies_subject: bool | None = None
+    manager_approval: bool | None = None
+    signatures: int | None = None
+    # ESC techniques whose template conditions it meets.
+    escs: list[str] = field(default_factory=list)
+    # Principals outside Tier Zero that can enroll in it.
+    enrollable_by: list[str] = field(default_factory=list)
+    tier_zero: bool = False
+    owned: bool = False
+    objectid: str = ""
+
+    def as_display(self) -> dict[str, Any]:
+        out = asdict(self)
+        out["enrollable_by"] = _shorten(self.enrollable_by)
+        return out
 
 
 @dataclass(frozen=True)

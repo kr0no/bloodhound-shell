@@ -21,18 +21,23 @@ from bhshell.errors import ApiError, CypherDisabledError, UnsupportedFeature
 from bhshell.models.entities import OWNED_LABEL, TIER_ZERO_LABEL, Edge, Graph, Node, last_logon
 from bhshell.models.results import Column
 from bhshell.queries import cypher as Q
+from bhshell.queries.adcs import template_escs
 from bhshell.queries.domains import TRUSTS_QUERY, trusts_from_graph
 from bhshell.queries.edges import (
     ACL_EDGES,
     ADCS_EDGES,
+    CA_MANAGE_EDGES,
     COERCION_EDGES,
     CONTROL_EDGES,
     DELEGATION_EDGES,
     ENABLE_EDGES,
+    ENROLL_EDGES,
     EXEC_EDGES,
     GPO_EDIT_EDGES,
     HAS_SESSION,
     MEMBER_OF,
+    PKI_CONTROL_EDGES,
+    PUBLISHED_TO,
     severity_rank,
 )
 from bhshell.queries.paths import PathService
@@ -61,11 +66,14 @@ TAKEOVER = {
     "WriteSPN": "Targeted Kerberoasting",
     "AddAllowedToAct": "RBCD",
     "WriteAccountRestrictions": "RBCD",
+    "WriteAltSecurityIdentities": "ESC14 (explicit certificate mapping)",
 }
 TAKEOVER_EDGES = frozenset(TAKEOVER)
 GPO_CONTROL_EDGES = GPO_EDIT_EDGES | {"WriteGPLink"}
-CA_CONTROL_EDGES = frozenset({"ManageCA", "ManageCertificates"})
 RELAY_EDGES = COERCION_EDGES - {ESC8_EDGE}
+# ESC techniques BloodHound has no edge for, found from the template's settings.
+TEMPLATE_ONLY_ESCS = ("ESC2", "ESC15")
+PKI_KINDS = ("CertTemplate", "EnterpriseCA", "RootCA", "AIACA", "NTAuthStore", "IssuancePolicy")
 FOREIGN_EDGES = ACL_EDGES | EXEC_EDGES | {MEMBER_OF}
 # Attributes that may hold a cleartext (or reversibly encoded) password.
 PASSWORD_ATTRS = ("userpassword", "unixpassword", "unicodepassword", "sfupassword")
@@ -439,6 +447,38 @@ def _foreign_rows(g: Graph, _: HuntOptions) -> list[Row]:
     return sorted(rows, key=lambda r: (not r["tier_zero"], r["edge"] == MEMBER_OF, r["principal"]))
 
 
+# AD CS
+
+def _templates(o: HuntOptions) -> str:
+    return (f"MATCH p=(n:Base)-[:{Q.edge_types(ENROLL_EDGES)}]->(t:CertTemplate)-[:{PUBLISHED_TO}]->(ca:EnterpriseCA)"
+            f"{Q.where(_NOT_T0, 't.requiresmanagerapproval = false', o.scope('n'), o.dom('t'))} "
+            f"RETURN p LIMIT {o.limit}")
+
+
+def _template_rows(g: Graph, _: HuntOptions) -> list[Row]:
+    cas: dict[str, list[str]] = {}
+    for e in g.edges:
+        if e.kind == PUBLISHED_TO:
+            cas.setdefault(e.source, []).append(g.nodes[e.target].name)
+    rows = []
+    for e in g.edges:
+        if e.kind not in ENROLL_EDGES or g.nodes[e.target].kind != "CertTemplate":
+            continue
+        escs = [esc for esc in template_escs(g.nodes[e.target].properties) if esc in TEMPLATE_ONLY_ESCS]
+        if escs:
+            rows.append(edge_row(g, e, escs=", ".join(escs), cas=", ".join(sorted(cas.get(e.target, [])))))
+    return sorted(rows, key=lambda r: (r["target"], r["principal"], r["edge"]))
+
+
+def _pki_rows(g: Graph, _: HuntOptions) -> list[Row]:
+    rows = [edge_row(g, e, technique="ESC4" if g.nodes[e.target].kind == "CertTemplate" else "ESC5")
+            for e in g.edges if e.kind in PKI_CONTROL_EDGES and g.nodes[e.target].kind in PKI_KINDS]
+    return sorted(rows, key=lambda r: (r["technique"], severity_rank(r["edge"]), r["target"], r["principal"]))
+
+
+_PKI_TARGET = "(" + " OR ".join(f"t:{k}" for k in PKI_KINDS) + ")"
+
+
 # OPSEC
 
 def _decoys(o: HuntOptions) -> str:
@@ -491,13 +531,27 @@ CHECKS: tuple[Check, ...] = (
           _broad, (PRINCIPAL, EDGE, TARGET, TARGET_KIND, T0), _broad_rows,
           fallback=lambda o: _broad(o, None), scoped=True),
     Check("adcs", "AD CS escalation paths (ESC*, GoldenCert)", "critical",
-          "Principals with a certificate-services escalation edge, including NTLM relay to web enrollment (ESC8).",
+          "Principals with a certificate-services escalation edge, including NTLM relay to web enrollment (ESC8). "
+          "'ca NAME' and 'template NAME' show the CA and template behind a finding.",
           _edge_check(ADCS_ABUSE_EDGES), (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, T0),
           _edge_rows(ADCS_ABUSE_EDGES), scoped=True),
+    Check("adcs-templates", "Certificate templates open to ESC2 / ESC15", "high",
+          "Published templates that principals outside Tier Zero can enroll in, issued without approval, with "
+          "any purpose or no EKU (ESC2) or schema version 1 and an enrollee-supplied subject (ESC15, unless "
+          "the CA has the November 2024 update). BloodHound has no edge for these; enrollment rights on the "
+          "CA are not checked. 'template NAME' shows the rest.",
+          _templates, (PRINCIPAL, PRINCIPAL_KIND, EDGE, Column("Template", "target"), Column("ESC", "escs"),
+                       Column("Published to", "cas"), OWNED), _template_rows, scoped=True),
+    Check("adcs-pki-control", "Control of certificate templates and PKI objects (ESC4 / ESC5)", "high",
+          "Principals outside Tier Zero that can rewrite a certificate template (ESC4) or a CA, root CA, AIA "
+          "CA, NTAuth store or issuance policy object (ESC5).",
+          _edge_check(PKI_CONTROL_EDGES, _NOT_T0, _PKI_TARGET, dom="t"),
+          (PRINCIPAL, PRINCIPAL_KIND, EDGE, Column("Technique", "technique"), TARGET, TARGET_KIND, OWNED),
+          _pki_rows, fallback=_edge_check(None, _NOT_T0, _PKI_TARGET, dom="t"), scoped=True),
     Check("adcs-ca-control", "Enterprise CA managed from outside Tier Zero (ESC7)", "high",
           "ManageCA / ManageCertificates on an Enterprise CA held by principals outside Tier Zero.",
-          _edge_check(CA_CONTROL_EDGES, _NOT_T0, target="EnterpriseCA", dom="t"),
-          (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED), _edge_rows(CA_CONTROL_EDGES), scoped=True),
+          _edge_check(CA_MANAGE_EDGES, _NOT_T0, target="EnterpriseCA", dom="t"),
+          (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED), _edge_rows(CA_MANAGE_EDGES), scoped=True),
     Check("kerberoastable", "Kerberoastable users", "high",
           "Enabled users with an SPN (excluding krbtgt); those with a path to Tier Zero first, then RC4, "
           "then the oldest passwords.",
@@ -524,8 +578,9 @@ CHECKS: tuple[Check, ...] = (
           _password_attrs, (NAME, KIND, DOMAIN, Column("Attribute", "attribute"), Column("Value", "value"), T0,
                             OWNED), _password_rows, fallback=lambda o: _password_attrs(o, lower=False)),
     Check("object-takeover", "Account and computer takeover primitives", "high",
-          "Shadow Credentials (AddKeyCredentialLink), targeted Kerberoasting (WriteSPN) and RBCD "
-          "(AddAllowedToAct, WriteAccountRestrictions) between non-Tier-Zero objects.",
+          "Shadow Credentials (AddKeyCredentialLink), targeted Kerberoasting (WriteSPN), RBCD "
+          "(AddAllowedToAct, WriteAccountRestrictions) and explicit certificate mappings "
+          "(WriteAltSecurityIdentities, ESC14) between non-Tier-Zero objects.",
           _edge_check(TAKEOVER_EDGES, _NOT_T0, f"NOT t:{TIER_ZERO_LABEL}", "t.enabled = true"),
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, Column("Technique", "technique"), TARGET, TARGET_KIND,
            Column("Target adminCount", "admincount", "bool")), _takeover_rows, scoped=True),

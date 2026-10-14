@@ -18,9 +18,10 @@ from bhshell.errors import (
     CypherDisabledError,
     NotFoundError,
 )
-from bhshell.models.entities import Graph, Node
+from bhshell.models.entities import Graph, Node, SummaryField
 from bhshell.models.results import Column, EntityReport, RelationshipRow, ViewResult
 from bhshell.queries import cypher as Q
+from bhshell.queries.adcs import ADCSService
 from bhshell.queries.containers import CONTAINER_KINDS, GPO_TARGET_KINDS, ContainerService
 from bhshell.queries.edges import (
     CONTROL_EDGES,
@@ -38,6 +39,7 @@ T = TypeVar("T")
 RAISE_LIMIT = "raise it with 'config max_results N'"
 
 ENTITY_KINDS = ("User", "Computer", "Group")
+ADCS_KINDS = ("EnterpriseCA", "CertTemplate")
 # Kinds accepted as attack-path endpoints.
 PATH_KINDS = (*ENTITY_KINDS, "Domain", "OU", "GPO", "Container")
 _SID_RE = re.compile(r"(^|-)S-1-\d+(-\d+)+$", re.IGNORECASE)
@@ -53,15 +55,17 @@ VIEWS: dict[str, tuple[str, ...]] = {
     "contents": CONTAINER_KINDS,
     "links": ("GPO",),
     "affected": ("GPO",),
+    "templates": ("EnterpriseCA",),
     "outbound": ENTITY_KINDS,
-    "inbound": (*ENTITY_KINDS, *CONTAINER_KINDS, "GPO"),
+    "inbound": (*ENTITY_KINDS, *CONTAINER_KINDS, "GPO", *ADCS_KINDS),
     "sessions": ENTITY_KINDS,
     "privs": ENTITY_KINDS,
     "gpos": (*GPO_TARGET_KINDS, *CONTAINER_KINDS),
 }
-# Views served by `ContainerService` and `GPOService`.
+# Views served by `ContainerService`, `GPOService` and `ADCSService`.
 CONTAINER_VIEWS = frozenset({"tree", "contents", "gpos"})
 GPO_VIEWS = frozenset({"links", "affected"})
+ADCS_VIEWS = frozenset({"templates"})
 
 FLAGS = [Column("T0", "tier_zero", "t0"), Column("Owned", "owned", "owned")]
 DEPTH, VIA = Column("Depth", "depth", "depth"), Column("Via", "via", "via")
@@ -100,6 +104,8 @@ REST_ROUTES: dict[tuple[str, str], list[RestRoute]] = {
     ("Container", "inbound"): [("controllers", "Controls", "in")],
     ("Domain", "inbound"): [("controllers", "Controls", "in")],
     ("GPO", "inbound"): [("controllers", "Controls", "in")],
+    ("EnterpriseCA", "inbound"): [("controllers", "Controls", "in")],
+    ("CertTemplate", "inbound"): [("controllers", "Controls", "in")],
     ("User", "sessions"): [("sessions", HAS_SESSION, "out")],
     ("Computer", "sessions"): [("sessions", HAS_SESSION, "in")],
     ("Group", "sessions"): [("sessions", HAS_SESSION, "out")],
@@ -203,6 +209,7 @@ class EntityService:
         self._scalars: dict[str, list[dict[str, Any]] | None] = {}
         self.containers = ContainerService(self)
         self.gpo = GPOService(self)
+        self.adcs = ADCSService(self)
 
     def reset_cache(self) -> None:
         self._cache.clear()
@@ -264,6 +271,31 @@ class EntityService:
                         rows.append(row)
             self._scalars[query] = rows
         return self._scalars[query]
+
+    def outside_t0(self, objectids: set[str], edges: frozenset[str], *,
+                   rights: bool = False) -> tuple[dict[str, list[str]], Graph]:
+        """The principals outside Tier Zero holding any of `edges` over each object, and the graph they came from.
+
+        Owned principals come first, as `NAME (owned)`; with `rights`, the rights are listed too:
+        `NAME (ManageCA, owned)`.
+        """
+        try:
+            g = self.run_cypher(Q.controllers_outside_t0(objectids, edges, self.max_results))
+        except ApiError:  # an edge kind unknown to this server: filter locally instead
+            g = self.run_cypher(Q.controllers_outside_t0(objectids, None, self.max_results))
+        found: dict[str, dict[str, tuple[bool, set[str]]]] = {}
+        for e in g.edges:
+            if e.kind in edges and e.source in g.nodes and e.target in g.nodes:
+                src = g.nodes[e.source]
+                held = found.setdefault(g.nodes[e.target].objectid, {}).setdefault(src.name, (src.owned, set()))
+                held[1].add(e.kind)
+        out: dict[str, list[str]] = {}
+        for oid, names in found.items():
+            out[oid] = []
+            for name, (owned, kinds) in sorted(names.items(), key=lambda kv: (not kv[1][0], kv[0])):
+                tags = [*(sorted(kinds) if rights else []), *(["owned"] if owned else [])]
+                out[oid].append(f"{name} ({', '.join(tags)})" if tags else name)
+        return out, g
 
     def truncation(self, graph: Graph) -> tuple[bool, int | None]:
         """Was `graph`'s LIMITed query cut off? Returns `(truncated, server_total)`.
@@ -358,17 +390,26 @@ class EntityService:
 
     def report(self, node: Node, views: list[str], *, show_summary: bool) -> EntityReport:
         report = EntityReport(node=node, show_summary=show_summary)
-        if show_summary and node.kind in CONTAINER_KINDS:
-            report.extra = self.containers.summary(node)
-        elif show_summary and node.kind == "GPO":
-            report.extra = self.gpo.summary(node)
+        if show_summary:
+            report.extra = self._queried_summary(node)
         for key in views:
             if node.kind in VIEWS.get(key, ()):
                 report.views.extend(self.view(node, key))
         return report
 
+    def _queried_summary(self, node: Node) -> list[SummaryField]:
+        """The summary fields that take queries (OU contents, GPO scope, ...), for the kinds that have them."""
+        if node.kind in CONTAINER_KINDS:
+            return self.containers.summary(node)
+        if node.kind == "GPO":
+            return self.gpo.summary(node)
+        if node.kind in ADCS_KINDS:
+            return self.adcs.summary(node)
+        return []
+
     def view(self, node: Node, key: str) -> list[ViewResult]:
-        owner = self.containers if key in CONTAINER_VIEWS else self.gpo if key in GPO_VIEWS else self
+        owner = (self.containers if key in CONTAINER_VIEWS else self.gpo if key in GPO_VIEWS
+                 else self.adcs if key in ADCS_VIEWS else self)
         return getattr(owner, key)(node)  # every VIEWS key is a method
 
     def groups(self, node: Node) -> list[ViewResult]:

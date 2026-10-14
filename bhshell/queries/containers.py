@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
-from bhshell.errors import ApiError, NotFoundError
+from bhshell.errors import NotFoundError
 from bhshell.models.entities import OWNED_LABEL, TIER_ZERO_LABEL, Graph, Node, SummaryField, opt_bool
 from bhshell.models.results import Column, ContainedRow, ContainerRow, GPOLinkRow, ViewResult
 from bhshell.queries import cypher as Q
@@ -350,28 +350,9 @@ class ContainerService:
 
         return self.entities._with_fallback(via_cypher, via_rest)
 
-    def editors(self, gpo_ids: set[str]) -> tuple[dict[str, list[str]], Graph]:
-        """The principals outside Tier Zero that can edit each GPO (owned first), and the graph they came from."""
-        limit = self.entities.max_results
-        try:
-            g = self.entities.run_cypher(Q.controllers_outside_t0(gpo_ids, GPO_EDIT_EDGES, limit))
-        except ApiError:  # an edge kind unknown to this server: filter locally instead
-            g = self.entities.run_cypher(Q.controllers_outside_t0(gpo_ids, None, limit))
-        found: dict[str, dict[str, bool]] = {}
-        for e in g.edges:
-            if e.kind in GPO_EDIT_EDGES and e.source in g.nodes and e.target in g.nodes:
-                src = g.nodes[e.source]
-                found.setdefault(g.nodes[e.target].objectid, {})[src.name] = src.owned
-        editors = {
-            oid: [f"{name} (owned)" if owned else name
-                  for name, owned in sorted(names.items(), key=lambda kv: (not kv[1], kv[0]))]
-            for oid, names in found.items()
-        }
-        return editors, g
-
     def _add_editors(self, view: ViewResult) -> None:
         """Fill `editable_by` with the principals outside Tier Zero that can edit each GPO."""
-        editors, g = self.editors({r.objectid for r in view.rows})
+        editors, g = self.entities.outside_t0({r.objectid for r in view.rows}, GPO_EDIT_EDGES)
         for row in view.rows:
             row.editable_by = editors.get(row.objectid, [])
         self.entities._capped(view, g)

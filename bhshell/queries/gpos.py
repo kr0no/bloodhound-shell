@@ -23,7 +23,7 @@ from bhshell.queries.containers import (
     rest_unavailable,
     short_name,
 )
-from bhshell.queries.edges import CONTAINS, GP_LINK
+from bhshell.queries.edges import CONTAINS, GP_LINK, GPO_EDIT_EDGES
 
 if TYPE_CHECKING:
     from bhshell.queries.service import EntityService
@@ -161,7 +161,7 @@ class GPOService:
                 if counts is not None:
                     reached = set().union(*(link.reached for link in links))
                     out += _affected(sum((counts.get(oid, Counts()) for oid in reached), Counts()))
-            editors, _ = self.entities.containers.editors({gpo.objectid})
+            editors, _ = self.entities.outside_t0({gpo.objectid}, GPO_EDIT_EDGES)
             names = editors.get(gpo.objectid)
             if names:
                 out.append(SummaryField("Editable by (outside Tier Zero)", names, "list", "high"))

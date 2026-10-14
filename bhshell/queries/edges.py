@@ -15,7 +15,7 @@ ACL_EDGES: frozenset[str] = frozenset({
     "GenericAll", "GenericWrite", "WriteDacl", "WriteOwner", "Owns",
     "ForceChangePassword", "AddMember", "AddSelf", "AllExtendedRights",
     "AddKeyCredentialLink", "WriteSPN", "WriteAccountRestrictions",
-    "WriteGPLink", "WriteOwnerLimitedRights", "OwnsLimitedRights",
+    "WriteGPLink", "WriteOwnerLimitedRights", "OwnsLimitedRights", "WriteAltSecurityIdentities",
 })  # OwnsRaw / WriteOwnerRaw are intentionally excluded: they duplicate Owns / WriteOwner.
 
 # Rights that let the holder re-enable a disabled account (write its userAccountControl, directly
@@ -40,6 +40,27 @@ ADCS_EDGES: frozenset[str] = frozenset({
     "Enroll", "ManageCA", "ManageCertificates", "GoldenCert", "WritePKIEnrollmentFlag",
     "WritePKINameFlag", "ADCSESC1", "ADCSESC3", "ADCSESC4", "ADCSESC6a", "ADCSESC6b",
     "ADCSESC9a", "ADCSESC9b", "ADCSESC10a", "ADCSESC10b", "ADCSESC13",
+})
+
+# AD CS structure: template -> CA it is published to, CA host -> CA, CA -> NTAuth store / issuing CA,
+# template -> issuance policy -> group (ESC13).
+PUBLISHED_TO = "PublishedTo"
+HOSTS_CA_SERVICE = "HostsCAService"
+TRUSTED_FOR_NTAUTH = "TrustedForNTAuth"
+ISSUED_SIGNED_BY = "IssuedSignedBy"
+EXTENDED_BY_POLICY = "ExtendedByPolicy"
+OID_GROUP_LINK = "OIDGroupLink"
+
+# Rights that let the holder manage a CA (ESC7).
+CA_MANAGE_EDGES: frozenset[str] = frozenset({"ManageCA", "ManageCertificates"})
+
+# Rights that let the holder enroll in a certificate template or on a CA.
+ENROLL_EDGES: frozenset[str] = frozenset({"Enroll", "GenericAll", "AllExtendedRights"})
+
+# Rights that let the holder rewrite a certificate template or another PKI object (ESC4 / ESC5).
+PKI_CONTROL_EDGES: frozenset[str] = frozenset({
+    "GenericAll", "GenericWrite", "WriteDacl", "WriteOwner", "Owns", "OwnsLimitedRights", "WriteOwnerLimitedRights",
+    "WritePKIEnrollmentFlag", "WritePKINameFlag",
 })
 
 # NTLM relay / coercion.
@@ -98,7 +119,7 @@ _HIGH = frozenset({
     "GenericWrite", "ForceChangePassword", "AddMember", "AddSelf", "AddKeyCredentialLink",
     "ReadLAPSPassword", "ReadGMSAPassword", "SyncLAPSPassword", "DumpSMSAPassword",
     "AllowedToDelegate", "AllowedToAct", "AddAllowedToAct", "WriteAccountRestrictions",
-    "CanPSRemote", "SQLAdmin", "WriteGPLink", "ManageCA", "CoerceToTGT",
+    "CanPSRemote", "SQLAdmin", "WriteGPLink", "ManageCA", "CoerceToTGT", "WriteAltSecurityIdentities",
     *COERCION_EDGES,
 })
 

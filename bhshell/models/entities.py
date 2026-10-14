@@ -38,6 +38,26 @@ PRIMARY_KINDS = (
 TIER_ZERO_LABEL = "Tag_Tier_Zero"
 OWNED_LABEL = "Tag_Owned"
 
+# Extended key usages, by the OIDs BloodHound stores.
+EKU_NAMES = {
+    "1.3.6.1.5.5.7.3.1": "Server Authentication",
+    "1.3.6.1.5.5.7.3.2": "Client Authentication",
+    "1.3.6.1.5.5.7.3.3": "Code Signing",
+    "1.3.6.1.5.5.7.3.4": "Secure Email",
+    "1.3.6.1.5.5.7.3.8": "Time Stamping",
+    "1.3.6.1.5.5.7.3.9": "OCSP Signing",
+    "1.3.6.1.5.2.3.4": "PKINIT Client Authentication",
+    "1.3.6.1.5.2.3.5": "KDC Authentication",
+    "1.3.6.1.4.1.311.10.3.4": "Encrypting File System",
+    "1.3.6.1.4.1.311.10.3.4.1": "File Recovery",
+    "1.3.6.1.4.1.311.10.3.12": "Document Signing",
+    "1.3.6.1.4.1.311.20.2.1": "Certificate Request Agent",
+    "1.3.6.1.4.1.311.20.2.2": "Smart Card Logon",
+    "1.3.6.1.4.1.311.21.5": "Private Key Archival",
+    "1.3.6.1.4.1.311.21.6": "Key Recovery Agent",
+    "2.5.29.37.0": "Any Purpose",
+}
+
 
 @dataclass
 class Node:
@@ -319,11 +339,13 @@ class ADObject:
     @staticmethod
     def wrap(node: Node) -> ADObject:
         kinds = {"User": User, "Computer": Computer, "Group": Group, "GPO": GPO,
-                 "OU": DirectoryContainer, "Container": DirectoryContainer, "Domain": DirectoryContainer}
+                 "OU": DirectoryContainer, "Container": DirectoryContainer, "Domain": DirectoryContainer,
+                 "CertTemplate": CertTemplate, "EnterpriseCA": EnterpriseCA}
         return kinds.get(node.kind, ADObject)(node)
 
     def _common_head(self) -> list[SummaryField]:
-        oid = "Object ID (GUID)" if self.node.kind in ("OU", "Container", "GPO") else "Object ID (SID)"
+        sid = self.node.kind in ("User", "Computer", "Group", "Domain")
+        oid = "Object ID (SID)" if sid else "Object ID (GUID)"
         fields = [
             SummaryField("Name", self.node.name),
             SummaryField("Type", self.node.kind),
@@ -429,6 +451,77 @@ class DirectoryContainer(ADObject):
         if self.node.kind == "OU":
             blocks = opt_bool(p, "blocksinheritance")
             fields.append(SummaryField("Blocks GPO Inheritance", blocks, "bool", _risk_if(blocks, "info")))
+        if p.get("whencreated"):
+            fields.append(SummaryField("Created", p["whencreated"], "date"))
+        return [*fields, *self._common_tail()]
+
+
+def effective_ekus(props: dict[str, Any]) -> list[str] | None:
+    """The EKUs a template's certificates carry (`None` when not collected); empty means any use."""
+    ekus = props.get("effectiveekus")
+    if ekus is None:
+        ekus = props.get("ekus")
+    return None if ekus is None else [str(e) for e in ekus]
+
+
+def _registry_flag(props: dict[str, Any], key: str, collected: str, label: str, risk: Risk = "none") -> SummaryField:
+    """A CA setting read from the CA host's registry, which SharpHound cannot always reach."""
+    if props.get(collected) is False:
+        return SummaryField(label, "not collected")
+    value = opt_bool(props, key)
+    return SummaryField(label, value, "bool", _risk_if(value, risk))
+
+
+class CertTemplate(ADObject):
+    def summary(self) -> list[SummaryField]:
+        p = self.props
+        auth = opt_bool(p, "authenticationenabled")
+        supplies = opt_bool(p, "enrolleesuppliessubject")
+        nosid = opt_bool(p, "nosecurityextension")
+        fields = [
+            *self._common_head(),
+            SummaryField("Display Name", p.get("displayname") or ""),
+            SummaryField("Template OID", p.get("oid") or ""),
+            SummaryField("Schema Version", p.get("schemaversion")),
+        ]
+        ekus = effective_ekus(p)
+        if ekus == []:
+            fields.append(SummaryField("Effective EKUs", "none (any purpose)"))
+        elif ekus:
+            fields.append(SummaryField("Effective EKUs", [EKU_NAMES.get(e, e) for e in ekus], "list"))
+        return [
+            *fields,
+            SummaryField("Authentication Enabled", auth, "bool"),
+            SummaryField("Enrollee Supplies Subject", supplies, "bool", _risk_if(supplies and auth)),
+            SummaryField("Requires Manager Approval", opt_bool(p, "requiresmanagerapproval"), "bool"),
+            SummaryField("Authorized Signatures Required", p.get("authorizedsignatures")),
+            SummaryField("No Security Extension", nosid, "bool", _risk_if(nosid and auth)),
+            SummaryField("Validity Period", p.get("validityperiod") or ""),
+            SummaryField("Renewal Period", p.get("renewalperiod") or ""),
+            *self._common_tail(),
+        ]
+
+
+class EnterpriseCA(ADObject):
+    def summary(self) -> list[SummaryField]:
+        p = self.props
+        fields = [
+            *self._common_head(),
+            SummaryField("CA Name", p.get("caname") or ""),
+            SummaryField("DNS Hostname", p.get("dnshostname") or ""),
+            SummaryField("Certificate Thumbprint", p.get("certthumbprint") or ""),
+            _registry_flag(p, "isuserspecifiessanenabled", "isuserspecifiessanenabledcollected",
+                           "User Specified SAN (ESC6)", "high"),
+            _registry_flag(p, "roleseparationenabled", "roleseparationenabledcollected", "Role Separation"),
+            _registry_flag(p, "hasenrollmentagentrestrictions", "enrollmentagentrestrictionscollected",
+                           "Enrollment Agent Restrictions"),
+        ]
+        endpoints = [*(p.get("httpenrollmentendpoints") or []), *(p.get("httpsenrollmentendpoints") or [])]
+        if endpoints:
+            fields.append(SummaryField("Web Enrollment Endpoints", endpoints, "list"))
+        if "hasvulnerableendpoint" in p:
+            vulnerable = opt_bool(p, "hasvulnerableendpoint")
+            fields.append(SummaryField("Relayable Web Enrollment (ESC8)", vulnerable, "bool", _risk_if(vulnerable)))
         if p.get("whencreated"):
             fields.append(SummaryField("Created", p["whencreated"], "date"))
         return [*fields, *self._common_tail()]

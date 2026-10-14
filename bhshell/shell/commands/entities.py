@@ -1,4 +1,4 @@
-"""Entity lookup commands: user, computer, group, lookup, ou, gpo."""
+"""Entity lookup commands: user, computer, group, lookup, ou, gpo, ca, template."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from bhshell.shell.commands.base import BaseCommands, add_output_args
 _NAME_HELP = "samaccountname, NAME@DOMAIN, DOMAIN\\NAME, FQDN (computers), SID or distinguished name"
 _OU_NAME_HELP = "NAME, NAME@DOMAIN, distinguished name (OU=...,DC=...), object ID, or a domain (corp.local)"
 _GPO_NAME_HELP = "display name, NAME@DOMAIN, distinguished name (CN={GUID},CN=POLICIES,...) or object ID"
+_CA_NAME_HELP = "CA name, NAME@DOMAIN, distinguished name or object ID"
+_TEMPLATE_NAME_HELP = "template name (not the display name), NAME@DOMAIN, distinguished name or object ID"
 
 
 def _entity_parser(kind: str | None) -> Cmd2ArgumentParser:
@@ -45,59 +47,85 @@ def _entity_parser(kind: str | None) -> Cmd2ArgumentParser:
     return p
 
 
-def _ou_parser() -> Cmd2ArgumentParser:
+View = tuple[tuple[str, str], str]
+
+
+def _explorer_parser(description: str, examples: str, summary: str, tip: str, name_help: str,
+                     views: list[View]) -> Cmd2ArgumentParser:
+    """A parser for the commands exploring one kind of object (ou, gpo, ca, template)."""
     p = Cmd2ArgumentParser(
-        description="Explore an OU, a container or a whole domain: where it sits, what is below it, "
-                    "the GPOs that apply and who controls it.",
-        epilog="ou corp.local -t              the whole OU tree of a domain\n"
-               "ou SERVERS@corp.local -c      every object below an OU\n"
-               "ou 'OU=WEB,OU=SERVERS,DC=corp,DC=local' -G   when several OUs share a name\n\n"
-               "Without view flags the summary is shown (location, objects below, linked GPOs).\n"
+        description=description,
+        epilog=f"{examples}\n\nWithout view flags the summary is shown ({summary}).\n"
                "With view flags only those views are shown; --all shows the summary plus every view.\n"
-               "'search -t OU' lists OUs.",
+               f"{tip}",
         formatter_class=RawDescriptionCmd2HelpFormatter,
     )
-    p.add_argument("name", help=_OU_NAME_HELP, choices_provider=BaseCommands.recent_names)
+    p.add_argument("name", help=name_help, choices_provider=BaseCommands.recent_names)
     p.add_argument("-d", "--domain", help="restrict the lookup to a domain (FQDN or NetBIOS)")
 
-    views = p.add_argument_group("views")
-    views.add_argument("-t", "--tree", action="store_true",
-                       help="OUs and containers below it, with object, Tier Zero and owned counts")
-    views.add_argument("-c", "--contents", action="store_true", help="every object below it, with its location")
-    views.add_argument("-G", "--gpos", action="store_true",
-                       help="GPOs applied to objects in it (enforced / blocked inheritance), and who outside "
-                            "Tier Zero can edit them")
-    views.add_argument("-I", "--inbound", action="store_true",
-                       help="principals with dangerous rights over it (WriteGPLink, GenericAll, ...)")
-    views.add_argument("-a", "--all", action="store_true", help="summary + every view")
+    group = p.add_argument_group("views")
+    for flags, help_text in views:
+        group.add_argument(*flags, action="store_true", help=help_text)
+    group.add_argument("-a", "--all", action="store_true", help="summary + every view")
     _add_view_output_args(p)
     return p
+
+
+def _ou_parser() -> Cmd2ArgumentParser:
+    return _explorer_parser(
+        "Explore an OU, a container or a whole domain: where it sits, what is below it, the GPOs that apply "
+        "and who controls it.",
+        "ou corp.local -t              the whole OU tree of a domain\n"
+        "ou SERVERS@corp.local -c      every object below an OU\n"
+        "ou 'OU=WEB,OU=SERVERS,DC=corp,DC=local' -G   when several OUs share a name",
+        "location, objects below, linked GPOs", "'search -t OU' lists OUs.", _OU_NAME_HELP, [
+            (("-t", "--tree"), "OUs and containers below it, with object, Tier Zero and owned counts"),
+            (("-c", "--contents"), "every object below it, with its location"),
+            (("-G", "--gpos"), ("GPOs applied to objects in it (enforced / blocked inheritance), and who outside "
+                               "Tier Zero can edit them")),
+            (("-I", "--inbound"), "principals with dangerous rights over it (WriteGPLink, GenericAll, ...)"),
+        ])
 
 
 def _gpo_parser() -> Cmd2ArgumentParser:
-    p = Cmd2ArgumentParser(
-        description="Show where a GPO is linked, which users and computers it applies to and who can edit it.",
-        epilog="gpo 'Default Domain Policy' -d corp.local\n"
-               "gpo 'WEB HARDENING@corp.local' -c   the users and computers it applies to\n\n"
-               "Without view flags the summary is shown (links, objects affected, editors outside Tier Zero).\n"
-               "With view flags only those views are shown; --all shows the summary plus every view.\n"
-               "'hunt gpo-control' lists the GPOs that principals outside Tier Zero can edit.",
-        formatter_class=RawDescriptionCmd2HelpFormatter,
-    )
-    p.add_argument("name", help=_GPO_NAME_HELP, choices_provider=BaseCommands.recent_names)
-    p.add_argument("-d", "--domain", help="restrict the lookup to a domain (FQDN or NetBIOS)")
+    return _explorer_parser(
+        "Show where a GPO is linked, which users and computers it applies to and who can edit it.",
+        "gpo 'Default Domain Policy' -d corp.local\n"
+        "gpo 'WEB HARDENING@corp.local' -c   the users and computers it applies to",
+        "links, objects affected, editors outside Tier Zero",
+        "'hunt gpo-control' lists the GPOs that principals outside Tier Zero can edit.", _GPO_NAME_HELP, [
+            (("-l", "--links"), ("domains and OUs it is linked to, whether each link is enforced, what it reaches "
+                                "and where blocked inheritance stops it")),
+            (("-c", "--affected"), "users and computers it applies to, with their location"),
+            (("-I", "--inbound"), "principals with dangerous rights over it (GenericAll, WriteDacl, ...)"),
+        ])
 
-    views = p.add_argument_group("views")
-    views.add_argument("-l", "--links", action="store_true",
-                       help="domains and OUs it is linked to, whether each link is enforced, what it reaches "
-                            "and where blocked inheritance stops it")
-    views.add_argument("-c", "--affected", action="store_true",
-                       help="users and computers it applies to, with their location")
-    views.add_argument("-I", "--inbound", action="store_true",
-                       help="principals with dangerous rights over it (GenericAll, WriteDacl, ...)")
-    views.add_argument("-a", "--all", action="store_true", help="summary + every view")
-    _add_view_output_args(p)
-    return p
+
+def _ca_parser() -> Cmd2ArgumentParser:
+    return _explorer_parser(
+        "Show an Enterprise CA: its host, its settings (ESC6, ESC8), who can enroll or manage it (ESC7) and the "
+        "templates it publishes.",
+        "ca CORP-CA@corp.local\n"
+        "ca CORP-CA -t                 the templates it publishes and the ESC conditions they meet",
+        "host and its admins, NT authentication trust, ESC settings, enrollment and management rights",
+        "'search -t EnterpriseCA' lists the CAs.", _CA_NAME_HELP, [
+            (("-t", "--templates"), ("published templates, the ESC conditions each meets and who outside Tier Zero "
+                                    "can enroll in it")),
+            (("-I", "--inbound"), "principals with rights over it (ManageCA, Enroll, GenericAll, ...)"),
+        ])
+
+
+def _template_parser() -> Cmd2ArgumentParser:
+    return _explorer_parser(
+        "Show a certificate template: what its certificates can do, the ESC conditions it meets, the CAs that "
+        "publish it and who can enroll in it or rewrite it.",
+        "template USER@corp.local\n"
+        "template WEBSERVER -I         everyone with rights over it",
+        "settings, ESC conditions, publishing CAs, enrollment and write rights",
+        "'search -t CertTemplate' lists the templates; 'hunt adcs-templates' those open to ESC2 / ESC15.",
+        _TEMPLATE_NAME_HELP, [
+            (("-I", "--inbound"), "principals with rights over it (Enroll, GenericAll, WriteDacl, ...)"),
+        ])
 
 
 def _add_view_output_args(p: Cmd2ArgumentParser) -> None:
@@ -161,3 +189,13 @@ class EntityCommands(BaseCommands):
     def do_gpo(self, args: argparse.Namespace) -> None:
         """Explore a GPO: where it is linked, what it applies to, who can edit it."""
         self._run(args, None, ("GPO",))
+
+    @with_argparser(_ca_parser)
+    def do_ca(self, args: argparse.Namespace) -> None:
+        """Explore an Enterprise CA: host, ESC settings, enrollment and management rights, templates."""
+        self._run(args, None, ("EnterpriseCA",))
+
+    @with_argparser(_template_parser)
+    def do_template(self, args: argparse.Namespace) -> None:
+        """Explore a certificate template: settings, ESC conditions, CAs, enrollment and write rights."""
+        self._run(args, None, ("CertTemplate",))

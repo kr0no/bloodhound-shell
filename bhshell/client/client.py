@@ -336,6 +336,8 @@ def _collection(kind: str) -> str:
         "gpo": "gpos",
         "ou": "ous",
         "container": "containers",
+        "enterpriseca": "enterprisecas",
+        "certtemplate": "certtemplates",
     }
     try:
         return mapping[kind.lower()]

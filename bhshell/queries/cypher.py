@@ -11,7 +11,15 @@ import re
 from collections.abc import Iterable
 
 from bhshell.models.entities import TIER_ZERO_LABEL
-from bhshell.queries.edges import CONTAINS, EXEC_EDGES, GP_LINK, HAS_SESSION, MEMBER_OF
+from bhshell.queries.edges import (
+    CONTAINS,
+    EXEC_EDGES,
+    EXTENDED_BY_POLICY,
+    GP_LINK,
+    HAS_SESSION,
+    MEMBER_OF,
+    OID_GROUP_LINK,
+)
 
 
 def lit(value: str) -> str:
@@ -244,4 +252,13 @@ def controllers_outside_t0(objectids: Iterable[str], edges: Iterable[str] | None
     return (
         f"MATCH p=(s:Base)-{_rel(edges)}->(t:Base) "
         f"WHERE t.objectid IN [{ids}] AND NOT s:{TIER_ZERO_LABEL} RETURN p LIMIT {limit}"
+    )
+
+
+def policy_groups(template_ids: Iterable[str]) -> str:
+    """Groups linked to an issuance policy of the templates (ESC13)."""
+    ids = ", ".join(lit(o) for o in sorted(template_ids))
+    return (
+        f"MATCH p=(t:CertTemplate)-[:{EXTENDED_BY_POLICY}]->(i:IssuancePolicy)-[:{OID_GROUP_LINK}]->(g:Group) "
+        f"WHERE t.objectid IN [{ids}] RETURN p"
     )
