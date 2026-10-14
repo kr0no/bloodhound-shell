@@ -117,10 +117,7 @@ class HuntOptions:
 
     def matches(self, domain: str) -> bool:
         """Whether `domain` (an FQDN) is in the selected domain, matched the same way as `dom`."""
-        if not self.domain:
-            return True
-        d, name = self.domain.upper(), domain.upper()
-        return name == d or ("." not in d and name.startswith(d + "."))
+        return Q.domain_matches(self.domain, domain)
 
 
 # Extra queries run after a check, filling in its rows; returns notes for the table.

@@ -48,6 +48,14 @@ def where(*conds: str) -> str:
     return f" WHERE {' AND '.join(present)}" if present else ""
 
 
+def domain_matches(domain: str, fqdn: str) -> bool:
+    """Whether `fqdn` is in `domain`, the way `domain_condition` matches it ('' matches everything)."""
+    if not domain:
+        return True
+    d, name = domain.upper(), fqdn.upper()
+    return name == d or ("." not in d and name.startswith(d + "."))
+
+
 def domain_condition(alias: str, domain: str) -> str:
     """Restrict `alias` to `domain`: an FQDN matches exactly, a NetBIOS name any FQDN it starts ('' = all)."""
     if not domain:

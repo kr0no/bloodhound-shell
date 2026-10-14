@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from cmd2 import Choices, CommandSet
 
+from bhshell.queries import cypher as Q
 from bhshell.render import export
 
 if TYPE_CHECKING:
@@ -25,6 +26,14 @@ class BaseCommands(CommandSet):
 
     def max_rows(self, args: argparse.Namespace) -> int:
         return self.app.config.display_rows if args.max_rows is None else args.max_rows
+
+    def check_domain(self, domain: str | None) -> None:
+        """Warn when `-d` matches no domain BloodHound knows: the results would just be empty."""
+        if not domain:
+            return
+        names = self.app.entities.domain_names()
+        if names and not any(Q.domain_matches(domain, name) for name in names):
+            self.app.ui.warn(f"No domain matches '{domain}' (known: {', '.join(names)}).")
 
     def export(self, path: str, data: Any, csv_table: tuple[list[str], list[dict[str, Any]]]) -> None:
         self.app.ui.success(f"Exported to {export.write(path, data, csv_table)}")

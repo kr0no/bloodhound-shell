@@ -102,6 +102,7 @@ class SearchCommands(BaseCommands):
             raise BHError("Give at least one FILTER, -t TYPE or -d DOMAIN (see 'help search')")
         if args.limit is not None and args.limit < 1:
             raise BHError("--limit must be at least 1")
+        self.check_domain(args.domain)
         opts = SearchOptions(filters=[parse_filter(f) for f in args.filters], kind=args.type,
                              domain=args.domain or "", limit=args.limit or app.config.max_results)
         columns = [c.strip() for spec in args.columns for c in spec.split(",") if c.strip()]

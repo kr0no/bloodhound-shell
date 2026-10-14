@@ -122,3 +122,12 @@ def test_search_usage_errors(shell: BHShell) -> None:
     before = shell.command_failures
     run(shell, "search -t nosuchtype hasspn")
     assert shell.command_failures == before + 1
+
+
+def test_unknown_domain_is_reported(shell: BHShell, mocked: Any) -> None:
+    mocked.add(responses.GET, f"{BASE}api/v2/available-domains", json={"data": [
+        {"type": "active-directory", "name": "CORP.LOCAL", "id": "S-1-5-21-1000", "collected": True}]})
+    run(shell, "login -u admin")
+    assert "No domain matches 'corpp' (known: CORP.LOCAL)" in run(shell, "search -t user -d corpp")
+    assert "No domain matches" not in run(shell, "search -t user -d corp")
+    assert "No domain matches" not in run(shell, "search -t user -d corp.local")

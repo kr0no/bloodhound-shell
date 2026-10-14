@@ -15,6 +15,7 @@ from bhshell.client.client import BHClient
 from bhshell.errors import (
     AmbiguousMatchError,
     ApiError,
+    BHError,
     CypherDisabledError,
     NotFoundError,
 )
@@ -402,6 +403,15 @@ class EntityService:
         merged.tier_zero = merged.tier_zero or node.tier_zero
         merged.owned = merged.owned or node.owned
         return merged
+
+    def domain_names(self) -> list[str] | None:
+        """The FQDNs of the Active Directory domains BloodHound knows (`None` if it cannot list them)."""
+        try:
+            listed = (self.client.get("api/v2/available-domains") or {}).get("data") or []
+        except BHError:  # no such endpoint, no permission, ...: nothing to check against
+            return None
+        return sorted(str(d.get("name") or "").upper() for d in listed
+                      if d.get("type", "active-directory") == "active-directory")
 
     def applicable_views(self, node: Node) -> list[str]:
         return [key for key, kinds in VIEWS.items() if node.kind in kinds]

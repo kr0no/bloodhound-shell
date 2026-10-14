@@ -96,6 +96,7 @@ class HuntCommands(BaseCommands):
             return
         app.require_auth()
         detail = args.all or bool(args.checks)
+        self.check_domain(args.domain)
         service = HuntService(app.entities)
         opts = HuntOptions(domain=args.domain or "", days=args.days, limit=app.config.max_results,
                            enrich=detail or args.json or bool(args.output))
