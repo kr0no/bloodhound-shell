@@ -115,6 +115,7 @@ def test_analysis_commands(shell: BHShell, mocked: Any, tmp_path: Path) -> None:
     assert "ForceChangePassword→ JDOE@CORP.LOCAL ─MemberOf→ IT ADMINS@CORP.LOCAL" in out
     assert "appears twice in a row" in run(shell, "path helpdesk --via helpdesk")
     assert "takes no SRC or --via" in run(shell, "path --owned --via helpdesk")
+    assert "takes no SRC or --via" in run(shell, "path --owned helpdesk jdoe@corp.local")
     out = run(shell, "hunt")
     assert "Hunt summary" in out and "kerberoastable" in out
     target = tmp_path / "kerb.csv"
@@ -221,6 +222,14 @@ def test_path_pick_selects_paths_by_list_number(three_paths: BHShell) -> None:
     assert "3. A@CORP.LOCAL [owned] ─AdminTo→" in out and "1. " not in out
     assert "Showing path 2, 3 of 3." in out
     assert "only 3 path(s)" in run(three_paths, "path --owned -p 4")
+
+
+def test_owned_lone_positional_is_dst(three_paths: BHShell, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+    monkeypatch.setattr(PathService, "owned_to",
+                        lambda self, dst: seen.append(dst.name) or PathResult(f"Owned → {dst.name}"))
+    run(three_paths, "path --owned jdoe@corp.local")
+    assert seen == ["JDOE@CORP.LOCAL"]  # the lone positional is the DST, not a (rejected) SRC
 
 
 def test_graph_asks_which_path_to_draw(three_paths: BHShell, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -106,10 +106,11 @@ class PathCommands(BaseCommands):
         exclude = frozenset().union(*args.exclude) if args.exclude else frozenset()
         service = PathService(app.entities, include_disabled=args.include_disabled, exclude=exclude)
         if args.owned:
-            if args.src or args.via:
+            if args.via or (args.src and args.dst):
                 raise BHError("--owned takes no SRC or --via (an optional DST is allowed)")
-            if args.dst:
-                result = service.owned_to(self._resolve(args.dst, args.domain))
+            dst = args.dst or args.src  # a lone positional is the optional DST
+            if dst:
+                result = service.owned_to(self._resolve(dst, args.domain))
             else:
                 result = service.owned_to_tier_zero()
         elif not args.src:
