@@ -76,9 +76,9 @@ def hops(result: Any) -> list[list[str]]:
 
 def test_search_also_runs_around_disabled_objects(client: BHClient, cypher: Any) -> None:
     # BloodHound rejects `endNode(r).enabled`: an unfiltered search is merged with one avoiding disabled objects.
-    queries = cypher(lambda q: (200, ENABLED_ONLY if "all(n IN nodes(p)" in q else ALL))
+    queries = cypher(lambda q: (200, ENABLED_ONLY if "n.enabled" in q else ALL))
     result = PathService(EntityService(client)).to_tier_zero(src())
-    assert "nodes(p)" not in queries[0] and "endNode(r)." not in queries[0]
+    assert "n.enabled" not in queries[0] and "endNode(r)." not in queries[0]
     assert "all(n IN nodes(p) WHERE n.enabled IS NULL OR n.enabled = true OR n = s)" in queries[1]
     assert hops(result) == [["HELPER@CORP.LOCAL", "IT@CORP.LOCAL", "DOMAIN ADMINS@CORP.LOCAL"]]
     assert result.skipped_disabled == ["_MSATASK$@CORP.LOCAL"]
@@ -113,9 +113,10 @@ def test_enable_right_held_through_a_group_counts(client: BHClient, cypher: Any)
 
 
 def test_rejected_filter_falls_back_with_a_note(client: BHClient, cypher: Any) -> None:
-    queries = cypher(lambda q: (400, '{"errors": [{"message": "unsupported"}]}') if "all(" in q else (200, ALL))
+    queries = cypher(lambda q: (400, '{"errors": [{"message": "unsupported"}]}') if "n.enabled" in q
+                     else (200, ALL))
     result = PathService(EntityService(client)).to_tier_zero(src())
-    assert "all(" not in queries[0] and "all(" in queries[1] and len(queries) == 2
+    assert "n.enabled" not in queries[0] and "n.enabled" in queries[1] and len(queries) == 2
     assert "MemberOf|" in queries[0]  # still the traversable-edge filter
     assert any("rejected the disabled-object filter" in n for n in result.notes)
     assert hops(result) == [["HELPER@CORP.LOCAL", "IT@CORP.LOCAL", "DOMAIN ADMINS@CORP.LOCAL"]]
@@ -124,7 +125,7 @@ def test_rejected_filter_falls_back_with_a_note(client: BHClient, cypher: Any) -
 def test_include_disabled_allows_any_disabled_object(client: BHClient, cypher: Any) -> None:
     queries = cypher(lambda q: (200, ALL))
     result = PathService(EntityService(client), include_disabled=True).to_tier_zero(src())
-    assert len(queries) == 1 and "all(" not in queries[0]
+    assert len(queries) == 1 and "n.enabled" not in queries[0]
     assert hops(result) == [["_MSATASK$@CORP.LOCAL", "DOMAIN ADMINS@CORP.LOCAL"]]
 
 
@@ -149,7 +150,7 @@ def test_rest_result_without_properties_is_checked_and_retried_via_cypher(
     def handler(q: str) -> tuple[int, str]:
         if "n.objectid IN [" in q:
             return 200, payload(["2"], [])
-        if "allShortestPaths(" in q and "all(n IN nodes(p)" in q:
+        if "allShortestPaths(" in q and "n.enabled" in q:
             return 200, ENABLED_ONLY
         return 404, "{}"
     queries = cypher(handler)
@@ -160,3 +161,16 @@ def test_rest_result_without_properties_is_checked_and_retried_via_cypher(
     assert hops(result) == [["HELPER@CORP.LOCAL", "IT@CORP.LOCAL", "DOMAIN ADMINS@CORP.LOCAL"]]
     assert any("n.enabled = true OR n = s OR n = t)" in q for q in queries)
     assert sum("Skipped paths through" in n for n in result.notes) == 1
+
+
+def test_tier_zero_paths_stop_at_the_first_tier_zero_object(client: BHClient, cypher: Any) -> None:
+    queries = cypher(lambda q: (200, ALL))
+    PathService(EntityService(client), include_disabled=True).to_tier_zero(src())
+    assert "all(n IN nodes(p) WHERE n = t OR NOT n:Tag_Tier_Zero)" in queries[0]
+
+
+def test_tier_zero_stop_condition_is_dropped_when_rejected(client: BHClient, cypher: Any) -> None:
+    queries = cypher(lambda q: (400, '{"errors": [{"message": "unsupported"}]}') if "n = t OR" in q
+                     else (200, ALL))
+    result = PathService(EntityService(client), include_disabled=True).to_tier_zero(src())
+    assert "n = t OR" not in queries[-1] and result.paths

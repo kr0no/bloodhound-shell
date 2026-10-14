@@ -253,12 +253,23 @@ class PathService:
         return self._build(result, graph, sources, lambda n: n.objectid == dst.objectid, keep=[dst.objectid])
 
     def _shortest_to_tier_zero(self, s_match: str, s_cond: str, result: PathResult) -> Graph:
-        """allShortestPaths from the `s` nodes matched by `s_match` and `s_cond` to Tier Zero."""
+        """allShortestPaths from the `s` nodes matched by `s_match` and `s_cond` to Tier Zero.
+
+        Paths stop at the first Tier Zero object: the ones going on through it (domain -> every
+        Tier Zero object it contains) are cut there anyway, and would fill the LIMIT.
+        """
         limit = self.entities.max_results
-        return self._first_working(lambda rel, filtered: (
-            f"MATCH p=allShortestPaths({s_match}-{rel}->(t:{TIER_ZERO_LABEL}))"
-            f"{Q.where('s <> t', s_cond, _no_disabled() if filtered else '')} RETURN p LIMIT {limit}"
-        ), result)
+
+        def search(stop: str) -> Graph:
+            return self._first_working(lambda rel, filtered: (
+                f"MATCH p=allShortestPaths({s_match}-{rel}->(t:{TIER_ZERO_LABEL}))"
+                f"{Q.where('s <> t', s_cond, stop, _no_disabled() if filtered else '')} RETURN p LIMIT {limit}"
+            ), result)
+
+        try:
+            return search(f"all(n IN nodes(p) WHERE n = t OR NOT n:{TIER_ZERO_LABEL})")
+        except ApiError:
+            return search("")
 
     def _first_working(self, build: QueryBuilder, result: PathResult) -> Graph:
         """Run with the traversable-edge filter, dropping it if the server rejects it."""
