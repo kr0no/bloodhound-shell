@@ -18,7 +18,7 @@ from bhshell.errors import (
     CypherDisabledError,
     NotFoundError,
 )
-from bhshell.models.entities import Graph, Node, SummaryField
+from bhshell.models.entities import Graph, Node, SummaryField, literal_rows
 from bhshell.models.results import Column, EntityReport, RelationshipRow, ViewResult
 from bhshell.queries import cypher as Q
 from bhshell.queries.adcs import ADCSService
@@ -260,15 +260,7 @@ class EntityService:
                 except (ApiError, CypherDisabledError):
                     pass
                 else:
-                    # Literals come back as one flat `{key, value}` list: a repeated key starts a new row.
-                    rows, row = [], {}
-                    for item in literals:
-                        if item.get("key") in row:
-                            rows.append(row)
-                            row = {}
-                        row[item.get("key")] = item.get("value")
-                    if row:
-                        rows.append(row)
+                    rows = literal_rows(literals)
             self._scalars[query] = rows
         return self._scalars[query]
 

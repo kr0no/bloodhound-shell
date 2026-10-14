@@ -10,7 +10,7 @@ import responses
 
 from bhshell.client.client import BHClient
 from bhshell.errors import AmbiguousMatchError, BHError, NotFoundError, UnsupportedFeature
-from bhshell.models.entities import Graph, Node, User
+from bhshell.models.entities import Graph, Node, User, literal_rows
 from bhshell.models.results import ViewResult
 from bhshell.queries import cypher as Q
 from bhshell.queries.marking import MarkingService
@@ -31,6 +31,12 @@ from tests.conftest import BASE, HELPDESK, IT_ADMINS, JDOE, SVC_SQL, WS01, graph
 def test_parse_identifier(raw: str, kind: str, sam: str, domain: str, fqdn: str, oid: str) -> None:
     ident = parse_identifier(raw, kind=kind)
     assert (ident.sam, ident.domain, ident.fqdn, ident.objectid) == (sam, domain, fqdn, oid)
+
+
+def test_literal_rows_split_on_repeated_keys() -> None:
+    literals = [{"key": "name", "value": "A"}, {"key": "n", "value": 1},
+                {"key": "name", "value": "B"}, {"key": "n", "value": 2}, {"key": "name", "value": "C"}]
+    assert literal_rows(literals) == [{"name": "A", "n": 1}, {"name": "B", "n": 2}, {"name": "C"}]
 
 
 def test_cypher_literal_escaping() -> None:

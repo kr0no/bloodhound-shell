@@ -36,7 +36,7 @@ def node_rows(nodes: Iterable[Node]) -> tuple[list[str], list[dict[str, Any]]]:
 
 
 def graph_dict(graph: Graph) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "nodes": [n.as_dict() for n in graph.nodes.values()],
         "edges": [
             {"source": graph.nodes[e.source].name if e.source in graph.nodes else e.source,
@@ -45,6 +45,16 @@ def graph_dict(graph: Graph) -> dict[str, Any]:
             for e in graph.edges
         ],
     }
+    if graph.rows:
+        out["rows"] = graph.rows
+    return out
+
+
+def graph_rows(graph: Graph) -> tuple[list[str], list[dict[str, Any]]]:
+    """CSV of a raw Cypher result: the nodes, or the returned values when there are no nodes."""
+    if graph.rows and not graph.nodes:
+        return list(dict.fromkeys(key for row in graph.rows for key in row)), graph.rows
+    return node_rows(graph.nodes.values())
 
 
 def _flat(value: Any) -> Any:

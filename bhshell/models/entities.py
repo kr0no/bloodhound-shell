@@ -160,16 +160,35 @@ class Edge:
         )
 
 
+def literal_rows(literals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Rows of the scalar values a query returned (`RETURN n.name AS name, count(m) AS total`).
+
+    BloodHound sends them as one flat `{key, value}` list: a key already in the row starts a new one.
+    """
+    rows: list[dict[str, Any]] = []
+    row: dict[str, Any] = {}
+    for item in literals:
+        if item.get("key") in row:
+            rows.append(row)
+            row = {}
+        row[item.get("key")] = item.get("value")
+    if row:
+        rows.append(row)
+    return rows
+
+
 @dataclass
 class Graph:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
     # The Cypher query this graph came from ('' when built otherwise).
     query: str = field(default="", compare=False, repr=False)
+    # Scalar values the query returned, as rows (see `literal_rows`).
+    rows: list[dict[str, Any]] = field(default_factory=list, compare=False, repr=False)
 
     @classmethod
     def from_cypher(cls, data: dict[str, Any]) -> Graph:
-        graph = cls()
+        graph = cls(rows=literal_rows(data.get("literals") or []))
         for node_id, raw in (data.get("nodes") or {}).items():
             graph.nodes[str(node_id)] = Node.from_cypher(node_id, raw)
         seen: set[Edge] = set()

@@ -299,8 +299,12 @@ class Renderer:
         return table
 
     def graph(self, graph: Graph) -> None:
-        if not graph.nodes and not graph.edges:
+        if not graph.nodes and not graph.edges and not graph.rows:
             self.console.print(Text("No results.", style="dim"))
+            return
+        if graph.rows:
+            self._literal_table(graph.rows)
+        if not graph.nodes:
             return
         self.nodes(graph.nodes.values(), "Nodes")
         if graph.edges:
@@ -314,6 +318,15 @@ class Renderer:
                               Text(e.kind, style=SEVERITY_STYLE[severity(e.kind)]),
                               Text(tgt.name if tgt else e.target))
             self.console.print(table)
+
+    def _literal_table(self, rows: list[dict[str, Any]]) -> None:
+        table = Table(title=f"Rows [{len(rows)}]", title_justify="left", box=box.SIMPLE_HEAD, header_style="bold")
+        keys = list(dict.fromkeys(key for row in rows for key in row))
+        for key in keys:
+            table.add_column(str(key), overflow="fold")
+        for row in rows:
+            table.add_row(*(self.fmt_value(row.get(key), "") for key in keys))
+        self.console.print(table)
 
     def key_values(self, title: str, rows: list[tuple[str, Any]]) -> None:
         table = Table(box=None, show_header=False, padding=(0, 2))

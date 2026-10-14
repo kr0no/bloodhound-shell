@@ -36,7 +36,7 @@ class BaseCommands(CommandSet):
         else:
             self.app.ui.graph(graph)
         if output:
-            self.export(output, export.graph_dict(graph), export.node_rows(graph.nodes.values()))
+            self.export(output, export.graph_dict(graph), export.graph_rows(graph))
 
 
 def output_path(value: str, formats: tuple[str, ...] = (".json", ".csv")) -> str:

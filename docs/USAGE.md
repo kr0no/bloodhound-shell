@@ -27,7 +27,7 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 | | `gpo NAME [-l] [-c] [-I]` | GPOs: links, the users and computers they apply to, who can edit them; see [Exploring GPOs](#exploring-gpos) |
 | | `ca NAME [-t] [-I]`, `template NAME [-I]` | AD CS: Enterprise CAs and certificate templates; see [Exploring AD CS](#exploring-ad-cs) |
 | | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
-| Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables |
+| Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables, or as rows when it returns values |
 | Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
 | Analysis | `path SRC [DST] [--via X ...] [--exclude EDGE] [-g] [-p N]`, `path --owned [DST] [-g] [-p N]` | Attack paths: SRC → DST, SRC → Tier Zero, or everything owned → a target (Tier Zero by default); ordered by fewest actions |
 | | `hunt [CHECK ...] [--all] [--list] [--owned \| --from NAME]` | Domain-wide weakness checks (summary, or details per check), optionally limited to what owned objects can do |
@@ -444,8 +444,8 @@ RETURN u
 
 * The `// name:` and `// description:` header lines are optional. Without a name, the file name is
   used (`stale-admins.cyp` → `stale-admins`). The description is shown by `query list`.
-* The query must return **nodes or paths** (`RETURN u`, `RETURN p`), not scalars such as
-  `count(u)` or `u.name`: bhshell renders the graph BloodHound sends back.
+* The query can return nodes or paths (`RETURN u`, `RETURN p`), shown as node and edge tables,
+  or values (`RETURN u.name AS name, u.pwdlastset AS pwd`, `count(u)`), shown as a table of rows.
 * Queries are picked up on the next `query` command, with no restart. Tab completion lists them
   after `query show` and `query run`.
 * A file with the same name as a bundled query replaces it.

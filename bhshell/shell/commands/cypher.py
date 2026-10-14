@@ -15,17 +15,17 @@ CYPHER_HELP = """\
 Usage: cypher [--json] [-o FILE] [-f QUERY_FILE] [QUERY]
 
 Run a raw Cypher query against BH (POST /api/v2/graphs/cypher) and render
-the returned nodes and edges. The query is taken verbatim from the command
-line, so '|', '>' and quotes need no escaping. The query must return nodes or
-paths, e.g.:
+what it returns: nodes and edges, or values. The query is taken verbatim from
+the command line, so '|', '>' and quotes need no escaping. For example:
 
   cypher MATCH (n:User) WHERE n.hasspn = true RETURN n LIMIT 20
   cypher MATCH p=(u:User)-[:MemberOf*1..]->(g:Group) WHERE g.name STARTS WITH 'DOMAIN ADMINS@' RETURN p
+  cypher MATCH (n:Computer) RETURN n.operatingsystem AS os, count(n) AS total
   cypher -f queries/kerberoastable.cyp -o kerberoastable.csv
 
 Options:
   --json        print the normalised result as JSON
-  -o FILE       export to FILE (.json or .csv; CSV contains the nodes)
+  -o FILE       export to FILE (.json or .csv; CSV contains the nodes, or the values)
   -f FILE       read the query from FILE
 """
 

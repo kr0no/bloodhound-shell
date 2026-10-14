@@ -83,6 +83,19 @@ def test_cypher_command_keeps_pipes(shell: BHShell, mocked: Any) -> None:
     assert sent == "MATCH p=(a)-[:A|B]->(b) RETURN p"
 
 
+def test_cypher_command_shows_and_exports_values(shell: BHShell, mocked: Any, tmp_path: Path) -> None:
+    run(shell, "login -u admin")
+    literals = [{"key": "os", "value": "WINDOWS SERVER 2019"}, {"key": "total", "value": 16},
+                {"key": "os", "value": None}, {"key": "total", "value": 3}]
+    mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher",
+                   json={"data": {"nodes": {}, "edges": [], "literals": literals}})
+    target = tmp_path / "os.csv"
+    out = run(shell, f"cypher -o {target} MATCH (n:Computer) RETURN n.operatingsystem AS os, count(n) AS total")
+    assert "Rows [2]" in out and "WINDOWS SERVER 2019" in out and "No results" not in out
+    assert list(csv.DictReader(target.open())) == [{"os": "WINDOWS SERVER 2019", "total": "16"},
+                                                   {"os": "", "total": "3"}]
+
+
 def test_auth_loss_drops_to_disconnected(shell: BHShell, mocked: Any) -> None:
     run(shell, "login -u admin")
     mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher", status=401,
