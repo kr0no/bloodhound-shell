@@ -47,6 +47,7 @@ def test_resolve_ambiguous_across_domains(client: BHClient) -> None:
     with pytest.raises(AmbiguousMatchError) as exc:
         EntityService(client).resolve("jdoe", "User")
     assert {n.domain for n in exc.value.candidates} == {"CORP.LOCAL", "DEV.CORP.LOCAL"}
+    assert "SID" in exc.value.hint
 
 
 @pytest.mark.parametrize("name, domain", [("CORP\\jdoe", None), ("jdoe", "corp.local")])

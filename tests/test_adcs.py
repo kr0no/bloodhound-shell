@@ -7,6 +7,7 @@ import pytest
 import responses
 
 from bhshell.client.client import BHClient
+from bhshell.errors import AmbiguousMatchError
 from bhshell.models.entities import Graph
 from bhshell.queries import cypher as Q
 from bhshell.queries.adcs import template_escs
@@ -159,6 +160,17 @@ def test_esc13_needs_a_freely_issued_template(svc: EntityService, monkeypatch: p
     monkeypatch.setitem(NODES["policyt"]["properties"], "requiresmanagerapproval", True)
     view = svc.view(svc.resolve("CORP-CA", kinds=("EnterpriseCA",)), "templates")[0]
     assert {r.name: r.escs for r in view.rows}["POLICY@CORP.LOCAL"] == []
+
+
+def test_same_named_templates_point_to_the_domain_or_guid(svc: EntityService,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    dev = template("40000001-0000-0000-0000-000000000000", "VULNUSER@DEV.CORP.LOCAL", domain="DEV.CORP.LOCAL")
+    nodes = {**NODES, "dev": dev}
+    monkeypatch.setitem(RESULTS, Q.by_name(Q.name_conditions("VULNUSER", None, None), None, 100),
+                        graph(["vuln", "dev"], [], nodes=nodes))
+    with pytest.raises(AmbiguousMatchError) as exc:
+        svc.resolve("VULNUSER", kinds=("CertTemplate",))
+    assert "object ID (GUID)" in exc.value.hint and "SID" not in exc.value.hint
 
 
 def test_ca_summary(svc: EntityService) -> None:

@@ -46,6 +46,9 @@ _SID_RE = re.compile(r"(^|-)S-1-\d+(-\d+)+$", re.IGNORECASE)
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _DN_RE = re.compile(r"^(CN|OU|DC)=.+", re.IGNORECASE)
 DN_HINT = "Use the distinguished name ('OU=Servers,OU=Tier1,DC=corp,DC=local') or the object ID (GUID)."
+# For objects identified by a GUID rather than a SID (GPOs, certificate templates, CAs, ...).
+GUID_HINT = "Qualify the name with its domain ('NAME@corp.local' or '--domain corp.local') or use the object ID (GUID)."
+SID_KINDS = ("User", "Computer", "Group", "Domain")
 
 # View keys in display order, and which entity kinds support them.
 VIEWS: dict[str, tuple[str, ...]] = {
@@ -342,7 +345,10 @@ class EntityService:
             raise NotFoundError(f"No {what} named '{name}'{scope}")
         if len(unique) > 1:
             found = sorted(unique.values(), key=lambda n: (n.domain, n.name))
-            hint = DN_HINT if any(n.kind in ("OU", "Container") for n in found) else ""
+            if any(n.kind in ("OU", "Container") for n in found):
+                hint = DN_HINT
+            else:
+                hint = "" if any(n.kind in SID_KINDS for n in found) else GUID_HINT
             raise AmbiguousMatchError(name, found, hint=hint)
         node = next(iter(unique.values()))
         if self.cypher_available is False:
