@@ -109,6 +109,11 @@ def _glob(prop: str, pattern: str) -> str:
 
 def condition(f: Filter, alias: str = "n") -> str:
     prop = f"{alias}.{f.attr}"
+
+    def unless_unset(cond: str) -> str:
+        # Unset differs from any value and contains no text: '!=' and '!~' keep those objects.
+        return f"({prop} IS NULL OR {cond})"
+
     if f.value is None:
         return f"{prop} IS {'NOT ' if f.op == '!=' else ''}NULL"
     if isinstance(f.value, bool):
@@ -118,15 +123,15 @@ def condition(f: Filter, alias: str = "n") -> str:
         return f"({prop} = {str(not f.value).lower()} OR {prop} IS NULL)"
     if f.op in ("~", "!~"):
         cond = f"toLower({prop}) CONTAINS {Q.lit(str(f.value).lower())}"
-        return cond if f.op == "~" else f"NOT ({cond})"
+        return cond if f.op == "~" else unless_unset(f"NOT ({cond})")
     if isinstance(f.value, (int, float)):
         if f.op == "=":  # numeric-looking strings ('samaccountname=1234') are stored as text
             return f"({prop} = {f.value} OR {prop} = {Q.lit(str(f.value))})"
         if f.op == "!=":
-            return f"({prop} <> {f.value} AND {prop} <> {Q.lit(str(f.value))})"
+            return unless_unset(f"({prop} <> {f.value} AND {prop} <> {Q.lit(str(f.value))})")
         return f"{prop} {f.op} {f.value}"
     cond = _glob(prop, f.value)
-    return cond if f.op == "=" else f"NOT ({cond})"
+    return cond if f.op == "=" else unless_unset(f"NOT ({cond})")
 
 
 @dataclass

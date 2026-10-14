@@ -80,8 +80,8 @@ search name=svc_* !enabled                             # any type, disabled svc_
 | Filter | Meaning |
 |---|---|
 | `ATTR` / `!ATTR` | true / false or unset |
-| `ATTR=VALUE`, `ATTR!=VALUE` | equals / differs (`null` = unset) |
-| `ATTR~TEXT`, `ATTR!~TEXT` | contains / doesn't contain |
+| `ATTR=VALUE`, `ATTR!=VALUE` | equals / differs or unset (`null` = unset) |
+| `ATTR~TEXT`, `ATTR!~TEXT` | contains / doesn't contain or unset |
 | `ATTR<VALUE`, `>`, `<=`, `>=` | numbers, dates (`2020-01-01`) or ages (`90d` = 90 days ago) |
 
 Text comparisons ignore case, and `*` at the start or end of a value is a wildcard. Quote filters

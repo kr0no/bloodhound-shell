@@ -51,9 +51,10 @@ def test_parse_filter_rejects(text: str) -> None:
     ("name=*sql", "toLower(n.name) ENDS WITH 'sql'"),
     ("name=*SQL*", "toLower(n.name) CONTAINS 'sql'"),
     ("name=JDOE@CORP.LOCAL", "toLower(n.name) = 'jdoe@corp.local'"),
-    ("name!=x", "NOT (toLower(n.name) = 'x')"),
+    ("name!=x", "(n.name IS NULL OR NOT (toLower(n.name) = 'x'))"),
     ("description~it's", "toLower(n.description) CONTAINS 'it\\'s'"),
-    ("description!~pw", "NOT (toLower(n.description) CONTAINS 'pw')"),
+    ("description!~pw", "(n.description IS NULL OR NOT (toLower(n.description) CONTAINS 'pw'))"),
+    ("admincount!=1", "(n.admincount IS NULL OR (n.admincount <> 1 AND n.admincount <> '1'))"),
     ("samaccountname=1234", "(n.samaccountname = 1234 OR n.samaccountname = '1234')"),
     ("pwdlastset<2020-01-01", "n.pwdlastset < 1577836800"),
 ])
