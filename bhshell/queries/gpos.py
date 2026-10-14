@@ -156,7 +156,7 @@ class GPOService:
             else:
                 out = [SummaryField("Linked to", [
                     f"{link.target.name}{' (enforced)' if link.enforced else ''}" for link in links], "list")]
-                blocked = sorted({short_name(n) for link in links for n in link.blocked_at})
+                blocked = sorted({dn_location(n) for link in links for n in link.blocked_at})
                 out.append(SummaryField("Stopped by blocked inheritance at", blocked, "list"))
                 counts = self._counts(links)
                 if counts is not None:
@@ -204,7 +204,7 @@ class GPOService:
                     computers=total and total.computers, enabled_computers=total and total.enabled_computers,
                     tier_zero_affected=total and total.tier_zero_targets,
                     owned_affected=total and total.owned_targets,
-                    blocked_at=[short_name(n) for n in link.blocked_at],
+                    blocked_at=[dn_location(n) for n in link.blocked_at],
                     tier_zero=target.tier_zero, owned=target.owned,
                     distinguishedname=str(target.properties.get("distinguishedname") or ""),
                     objectid=target.objectid,

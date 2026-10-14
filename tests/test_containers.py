@@ -343,7 +343,7 @@ def test_gpo_summary_counts_only_what_the_links_reach(svc: EntityService) -> Non
     gpo = svc.resolve("WALLPAPER", kinds=("GPO",))
     fields = {f.label: f.value for f in svc.report(gpo, [], show_summary=True).extra}
     assert fields["Linked to"] == ["CORP.LOCAL"]
-    assert fields["Stopped by blocked inheritance at"] == ["SERVERS"]
+    assert fields["Stopped by blocked inheritance at"] == ["CORP.LOCAL/SERVERS"]
     # WEB01 and SQL01 sit below SERVERS, which blocks inheritance.
     assert fields["Computers affected (enabled)"] == "0 (0)"
     assert fields["Users affected (enabled)"] == "2 (1)"
@@ -356,7 +356,7 @@ def test_gpo_links_and_affected_views(svc: EntityService) -> None:
     links, affected = (svc.view(gpo, key)[0] for key in ("links", "affected"))
     link = links.rows[0]
     assert (link.linked_to, link.enforced, link.users, link.computers, link.blocked_at) == (
-        "CORP.LOCAL", None, 2, 0, ["SERVERS"])
+        "CORP.LOCAL", None, 2, 0, ["CORP.LOCAL/SERVERS"])
     assert [(r.name, r.location, r.depth) for r in affected.rows] == [
         ("HELPDESK@CORP.LOCAL", "CORP.LOCAL/USERS", 2),  # owned first
         ("JDOE@CORP.LOCAL", "CORP.LOCAL/STAFF", 2),
