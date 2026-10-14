@@ -275,14 +275,22 @@ class Renderer:
                           Text(example), Text(f.error or f.check.title, style="yellow" if f.error else ""))
         self.console.print(table)
 
-    def nodes(self, nodes: Iterable[Node], title: str) -> None:
-        self.console.print(self._nodes_table(nodes, title))
+    def nodes(self, nodes: Iterable[Node], title: str, max_rows: int = 0) -> None:
+        nodes = list(nodes)
+        if not nodes:
+            self.console.print(Text.assemble((f"{title} [0]", "bold"), ("  No results.", "dim")))
+            return
+        shown = first_n(nodes, max_rows)
+        self.console.print(self._nodes_table(shown, title, total=len(nodes)))
+        if len(shown) < len(nodes):
+            self.console.print(_more(len(shown), len(nodes), "rows", "--max-rows"))
 
     @staticmethod
-    def _nodes_table(nodes: Iterable[Node], title: str, *, dn: bool = False) -> Table:
-        """`dn` adds the distinguished name, which tells same-named OUs apart."""
+    def _nodes_table(nodes: Iterable[Node], title: str, *, dn: bool = False, total: int | None = None) -> Table:
+        """`dn` adds the distinguished name, which tells same-named OUs apart; `total` counts rows not shown."""
         nodes = list(nodes)
-        table = Table(title=Text(f"{title} [{len(nodes)}]"), title_justify="left", box=box.SIMPLE_HEAD,
+        count = len(nodes) if total is None else total
+        table = Table(title=Text(f"{title} [{count}]"), title_justify="left", box=box.SIMPLE_HEAD,
                       header_style="bold")
         headers = ("Type", "Name", "Domain", *(("Distinguished name",) if dn else ()), "Object ID", "Enabled",
                    "T0", "Owned")

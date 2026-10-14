@@ -17,7 +17,7 @@ from bhshell.queries.paths import PathResult, PathService
 from bhshell.render import export
 from bhshell.render.views import Renderer
 from bhshell.shell.app import BHShell
-from tests.conftest import BASE, run
+from tests.conftest import BASE, graph, run
 from tests.test_svg import A, B, C, D, chain
 
 
@@ -94,6 +94,16 @@ def test_cypher_command_shows_and_exports_values(shell: BHShell, mocked: Any, tm
     assert "Rows [2]" in out and "WINDOWS SERVER 2019" in out and "No results" not in out
     assert list(csv.DictReader(target.open())) == [{"os": "WINDOWS SERVER 2019", "total": "16"},
                                                    {"os": "", "total": "3"}]
+
+
+def test_marked_object_lists(shell: BHShell, mocked: Any) -> None:
+    run(shell, "login -u admin")
+    assert "HELPDESK@CORP.LOCAL" in run(shell, "owned list")
+    out = run(shell, "hvt list")  # nothing tagged Tier Zero in the fixtures
+    assert "No results." in out and "Object ID" not in out
+    mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher", json=graph(["1", "5", "7"], []))
+    out = run(shell, "owned list -n 2")
+    assert "[3]" in out and "showing 2 of 3 rows" in out and "SVC_SQL@CORP.LOCAL" not in out
 
 
 def test_auth_loss_drops_to_disconnected(shell: BHShell, mocked: Any) -> None:

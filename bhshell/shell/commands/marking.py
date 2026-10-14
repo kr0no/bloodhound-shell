@@ -18,6 +18,8 @@ def _marking_parser(tag: Tag) -> Cmd2ArgumentParser:
     p = Cmd2ArgumentParser(description=f"List or change {label} objects.")
     sub = p.add_subparsers(dest="action", required=True, metavar="{list,add,remove}")
     ls = sub.add_parser("list", help=f"list {label} objects")
+    ls.add_argument("-n", "--max-rows", type=int, metavar="N",
+                    help="max table rows (default: config display_rows; 0 = all)")
     add_output_args(ls)
     for action in ("add", "remove"):
         a = sub.add_parser(action, help=f"{action} an object {'to' if action == 'add' else 'from'} {label}")
@@ -39,7 +41,7 @@ class MarkingCommands(BaseCommands):
             if args.json:
                 app.poutput(export.to_json([n.as_dict() for n in nodes]))
             else:
-                app.ui.nodes(nodes, _LABEL[tag])
+                app.ui.nodes(nodes, _LABEL[tag], self.max_rows(args))
             if args.output:
                 self.export(args.output, [n.as_dict() for n in nodes], export.node_rows(nodes))
             return
