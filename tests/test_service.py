@@ -81,6 +81,18 @@ def test_outbound_and_privs_include_inherited(client: BHClient) -> None:
     assert [(r.edge, r.target, r.via) for r in privs] == [("AdminTo", "WS01.CORP.LOCAL", "IT ADMINS@CORP.LOCAL")]
 
 
+def test_outbound_lists_worst_rights_first_whichever_group_holds_them(
+        client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    jdoe = svc.resolve("jdoe", "User", "CORP.LOCAL")
+    # A medium right held directly, a critical one held through IT ADMINS.
+    held = Graph.from_cypher(graph(["1", "2", "5", "8"], [
+        ("1", "Enroll", "5"), ("1", "MemberOf", "2"), ("2", "ADCSESC1", "8")])["data"])
+    monkeypatch.setattr(svc, "run_cypher", lambda query: held)
+    rows = svc.view(jdoe, "outbound")[0].rows
+    assert [(r.edge, r.via) for r in rows] == [("ADCSESC1", "IT ADMINS@CORP.LOCAL"), ("Enroll", "direct")]
+
+
 def test_outbound_falls_back_to_wildcard_query(client: BHClient) -> None:
     svc = EntityService(client)
     node = svc.resolve("svc_sql", "User")
