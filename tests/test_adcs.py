@@ -13,6 +13,7 @@ from bhshell.queries.adcs import template_escs
 from bhshell.queries.edges import (
     CA_MANAGE_EDGES,
     ENROLL_EDGES,
+    ENROLL_ON_BEHALF_OF,
     HOSTS_CA_SERVICE,
     ISSUED_SIGNED_BY,
     PKI_CONTROL_EDGES,
@@ -101,6 +102,7 @@ RESULTS: dict[str, dict[str, Any]] = {
     # VULNUSER
     Q.outgoing_direct(VULN, L, {PUBLISHED_TO}): g("vuln", "ca", edges=[("vuln", PUBLISHED_TO, "ca")]),
     Q.controllers_outside_t0({VULN}, ENROLL_EDGES, L): g("users", "vuln", edges=[("users", "Enroll", "vuln")]),
+    Q.incoming(VULN, {ENROLL_ON_BEHALF_OF}, L): g("any", "vuln", edges=[("any", ENROLL_ON_BEHALF_OF, "vuln")]),
 }
 
 
@@ -180,8 +182,8 @@ def test_ca_summary(svc: EntityService) -> None:
 def test_ca_templates_view(svc: EntityService) -> None:
     view = svc.view(svc.resolve("CORP-CA", kinds=("EnterpriseCA",)), "templates")[0]
     assert [(r.name.split("@")[0], r.escs, bool(r.enrollable_by)) for r in view.rows] == [
-        ("ANYPURPOSE", ["ESC2", "ESC4"], True),  # meets a condition and someone can enroll
-        ("VULNUSER", ["ESC1"], True),
+        ("VULNUSER", ["ESC1"], True),  # meets a condition and someone can enroll; ESC1 first
+        ("ANYPURPOSE", ["ESC2", "ESC4"], True),
         ("WEBSERVER", ["ESC15"], True),
         ("POLICY", ["ESC13"], False),
         ("SAFE", [], False),
@@ -193,7 +195,8 @@ def test_template_from_the_shell(shell: BHShell, pki: list[str]) -> None:
     run(shell, "login -u admin")
     out = run(shell, "template VULNUSER@corp.local")
     for expected in ("Client Authentication", "Enrollee Supplies Subject", "CORP-CA@CORP.LOCAL",
-                     "ESC1: enrollee supplies the subject", "DOMAIN USERS@CORP.LOCAL"):
+                     "ESC1: enrollee supplies the subject", "DOMAIN USERS@CORP.LOCAL",
+                     "Requested on behalf of others with", "ANYPURPOSE@CORP.LOCAL"):
         assert expected in out
     out = run(shell, "ca CORP-CA -t")
     assert "ANYPURPOSE@CORP.LOCAL" in out and "Host" not in out

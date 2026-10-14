@@ -43,13 +43,14 @@ ADCS_EDGES: frozenset[str] = frozenset({
 })
 
 # AD CS structure: template -> CA it is published to, CA host -> CA, CA -> NTAuth store / issuing CA,
-# template -> issuance policy -> group (ESC13).
+# template -> issuance policy -> group (ESC13), enrollment agent template -> template it requests (ESC3).
 PUBLISHED_TO = "PublishedTo"
 HOSTS_CA_SERVICE = "HostsCAService"
 TRUSTED_FOR_NTAUTH = "TrustedForNTAuth"
 ISSUED_SIGNED_BY = "IssuedSignedBy"
 EXTENDED_BY_POLICY = "ExtendedByPolicy"
 OID_GROUP_LINK = "OIDGroupLink"
+ENROLL_ON_BEHALF_OF = "EnrollOnBehalfOf"
 
 # Rights that let the holder manage a CA (ESC7).
 CA_MANAGE_EDGES: frozenset[str] = frozenset({"ManageCA", "ManageCertificates"})

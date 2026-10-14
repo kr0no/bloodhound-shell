@@ -17,6 +17,7 @@ from bhshell.queries.containers import rest_unavailable
 from bhshell.queries.edges import (
     CA_MANAGE_EDGES,
     ENROLL_EDGES,
+    ENROLL_ON_BEHALF_OF,
     EXTENDED_BY_POLICY,
     HOSTS_CA_SERVICE,
     ISSUED_SIGNED_BY,
@@ -52,7 +53,7 @@ TEMPLATE_COLS = [
     Column("Template", "name"), Column("Schema", "schema_version"), Column("Auth", "authentication", "bool"),
     Column("Enrollee supplies subject", "enrollee_supplies_subject", "bool"),
     Column("Manager approval", "manager_approval", "bool"), Column("Signatures", "signatures"),
-    Column("ESC conditions", "escs"), Column("Enrollable by (outside Tier Zero)", "enrollable_by"), *FLAGS,
+    Column("ESC conditions", "escs"), Column("Enrollable by (non-T0)", "enrollable_by"), *FLAGS,
 ]
 
 
@@ -163,12 +164,20 @@ class ADCSService:
         escs = [label for _, label in self._escs([template])[oid]]
         enrollers, _ = self.entities.outside_t0({oid}, ENROLL_EDGES)
         writers, _ = self.entities.outside_t0({oid}, PKI_CONTROL_EDGES)
-        return [
+        fields = [
             _names("Published to", cas, "no Enterprise CA (nothing is issued from it)"),
             _names("ESC conditions met", escs, "none", "high" if cas else "medium"),
             _names("Enrollable by (outside Tier Zero)", enrollers.get(oid), "nobody"),
             _names("Writable by (outside Tier Zero)", writers.get(oid), "nobody", "high"),
         ]
+        # ESC3: an agent template's certificate requests this one on behalf of another user, or the reverse.
+        agents = [t.name for t in self._linked(oid, ENROLL_ON_BEHALF_OF, incoming=True)]
+        if agents:
+            fields.append(SummaryField("Requested on behalf of others with", agents, "list"))
+        targets = [t.name for t in self._linked(oid, ENROLL_ON_BEHALF_OF)]
+        if targets:
+            fields.append(SummaryField("Agent certificate for", targets, "list"))
+        return fields
 
     def _ca_summary(self, ca: Node) -> list[SummaryField]:
         oid = ca.objectid
@@ -182,12 +191,16 @@ class ADCSService:
             admins, _ = self.entities.outside_t0({h.objectid for h in hosts}, frozenset({"AdminTo"}))
         enrollers, _ = self.entities.outside_t0({oid}, ENROLL_EDGES)
         managers, _ = self.entities.outside_t0({oid}, CA_MANAGE_EDGES, rights=True)
+        # One issuing CA is often three nodes of the same name: its RootCA, AIACA and EnterpriseCA.
+        issuers = list(dict.fromkeys(n.name for n in self._linked(oid, ISSUED_SIGNED_BY)))
+        if not issuers and len(ca.properties.get("certchain") or []) == 1:
+            issuers = ["itself (root CA)"]
         return [
             _names("Host", [h.name for h in hosts], "unknown"),
             _names("Admins of the host (outside Tier Zero)", [a for h in hosts for a in admins.get(h.objectid, [])],
                    "nobody", "high"),
             SummaryField("Trusted for NT Authentication", bool(self._linked(oid, TRUSTED_FOR_NTAUTH)), "bool"),
-            _names("Issued by", [n.name for n in self._linked(oid, ISSUED_SIGNED_BY)], "unknown"),
+            _names("Issued by", issuers, "unknown"),
             SummaryField("Published templates", len(templates)),
             _names("Templates meeting ESC conditions", flagged, "none", "high"),
             _names("Enrollable by (outside Tier Zero)", enrollers.get(oid), "nobody"),
@@ -220,7 +233,8 @@ class ADCSService:
                     enrollable_by=enrollers.get(t.objectid, []),
                     tier_zero=t.tier_zero, owned=t.owned, objectid=t.objectid,
                 ))
-            rows.sort(key=lambda r: (not (r.escs and r.enrollable_by), not r.escs, r.name))
+            rows.sort(key=lambda r: (not (r.escs and r.enrollable_by), not r.escs,
+                                     min((int(esc[3:]) for esc in r.escs), default=0), r.name))
             view = ViewResult("templates", title, TEMPLATE_COLS, rows)
             if any(r.escs for r in rows):
                 view.notes.append(TEMPLATE_CAVEAT)
