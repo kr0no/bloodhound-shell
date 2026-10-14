@@ -342,7 +342,8 @@ asks.
 │ ● SVC_SQL │               │ ● JDOE │
 ╰─────┬─────╯               ╰────┬───╯
 ```
-Sources and targets can be users, computers, groups, domains, OUs or GPOs. Owned objects that are
+Sources and targets can be users, computers, groups, domains, OUs, GPOs, certificate templates
+or CA objects (Enterprise, root and AIA CAs, the NTAuth store). Owned objects that are
 already Tier Zero are listed in a note.
 
 `-o FILE.svg` draws the paths shown (see `-n`) as one diagram for reports, with a legend and no

@@ -40,8 +40,9 @@ RAISE_LIMIT = "raise it with 'config max_results N'"
 
 ENTITY_KINDS = ("User", "Computer", "Group")
 ADCS_KINDS = ("EnterpriseCA", "CertTemplate")
-# Kinds accepted as attack-path endpoints.
-PATH_KINDS = (*ENTITY_KINDS, "Domain", "OU", "GPO", "Container")
+# Kinds accepted as attack-path endpoints: AD CS objects too, the targets of ESC4 / ESC5 / ESC7.
+PATH_KINDS = (*ENTITY_KINDS, "Domain", "OU", "GPO", "Container", *ADCS_KINDS, "RootCA", "AIACA", "NTAuthStore",
+              "IssuancePolicy")
 _SID_RE = re.compile(r"(^|-)S-1-\d+(-\d+)+$", re.IGNORECASE)
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _DN_RE = re.compile(r"^(CN|OU|DC)=.+", re.IGNORECASE)
@@ -191,6 +192,20 @@ def _matches(node: Node, ident: Identifier, kinds: tuple[str, ...]) -> bool:
         dom = _node_domain(node)
         return dom == ident.domain or dom.startswith(ident.domain + ".")
     return True
+
+
+# One CA shows up as up to three nodes of the same name, in this order of preference: the Enterprise CA
+# (enrolled on) stands for it.
+_CA_KINDS = ("EnterpriseCA", "RootCA", "AIACA")
+
+
+def _one_ca(nodes: dict[str, Node]) -> dict[str, Node]:
+    """The Enterprise CA, when `nodes` are the CA nodes of a single CA; `nodes` otherwise."""
+    found = list(nodes.values())
+    if len({(n.name, n.domain) for n in found}) > 1 or any(n.kind not in _CA_KINDS for n in found):
+        return nodes
+    best = min(found, key=lambda n: _CA_KINDS.index(n.kind))
+    return {best.objectid: best}
 
 
 def truncation_note(limit: int, totals: Iterable[int | None], what: str = "paths") -> str:
@@ -343,6 +358,8 @@ class EntityService:
             what = (kind or "object").lower()
             scope = f" in domain {ident.domain}" if ident.domain else ""
             raise NotFoundError(f"No {what} named '{name}'{scope}")
+        if len(unique) > 1:
+            unique = _one_ca(unique)
         if len(unique) > 1:
             found = sorted(unique.values(), key=lambda n: (n.domain, n.name))
             if any(n.kind in ("OU", "Container") for n in found):

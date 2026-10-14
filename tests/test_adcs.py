@@ -22,7 +22,7 @@ from bhshell.queries.edges import (
     TRUSTED_FOR_NTAUTH,
 )
 from bhshell.queries.hunt import CHECKS_BY_ID, HuntOptions
-from bhshell.queries.service import EntityService
+from bhshell.queries.service import PATH_KINDS, EntityService
 from bhshell.shell.app import BHShell
 from tests.conftest import BASE, L, graph, run
 
@@ -171,6 +171,17 @@ def test_same_named_templates_point_to_the_domain_or_guid(svc: EntityService,
     with pytest.raises(AmbiguousMatchError) as exc:
         svc.resolve("VULNUSER", kinds=("CertTemplate",))
     assert "object ID (GUID)" in exc.value.hint and "SID" not in exc.value.hint
+
+
+def test_path_endpoints_include_pki_objects_and_a_ca_name_means_the_enterprise_ca(
+        svc: EntityService, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = node("50000001-0000-0000-0000-000000000000", "RootCA", "CORP-CA@CORP.LOCAL", t0=True)
+    aia = node("50000002-0000-0000-0000-000000000000", "AIACA", "CORP-CA@CORP.LOCAL", t0=True)
+    nodes = {**NODES, "root2": root, "aia": aia}
+    monkeypatch.setitem(RESULTS, Q.by_name(Q.name_conditions("CORP-CA", None, None), None, 100),
+                        graph(["ca", "root2", "aia"], [], nodes=nodes))
+    assert svc.resolve("CORP-CA", kinds=PATH_KINDS).objectid == CA
+    assert svc.resolve("VULNUSER@corp.local", kinds=PATH_KINDS).kind == "CertTemplate"
 
 
 def test_ca_summary(svc: EntityService) -> None:
