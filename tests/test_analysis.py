@@ -316,6 +316,29 @@ def test_exclude_uses_cypher_and_filters_edges(client: BHClient, monkeypatch: py
     assert queries and "HasSession" not in queries[0]  # the edge is left out of the traversable set
 
 
+def test_shortest_with_excluded_edges_keeps_every_shortest_path(client: BHClient,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    jdoe, admins = svc.resolve("jdoe", "User", "CORP.LOCAL"), svc.resolve(DOMAIN_ADMINS)
+    queries: list[str] = []
+
+    def answer(query: str) -> Graph:
+        queries.append(query)
+        if "allShortestPaths" not in query:  # the disabled-object check: no match
+            result = g([], [])
+        else:  # two paths of two hops: through IT ADMINS, and through SVC_SQL
+            result = g(["1", "2", "3", "5"], [("1", "MemberOf", "2"), ("2", "MemberOf", "3"),
+                                              ("1", "GenericAll", "5"), ("5", "AddMember", "3")])
+        result.query = query
+        return result
+
+    monkeypatch.setattr(svc, "run_cypher", answer)
+    result = PathService(svc, exclude={"HasSession"}).shortest(jdoe, admins)
+    assert len(result.paths) == 2
+    searches = [q for q in queries if "allShortestPaths" in q]
+    assert searches and all(q.endswith(f"LIMIT {svc.max_results}") for q in searches)
+
+
 def test_owned_to_target(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
     svc = EntityService(client)
     target = svc.resolve("IT Admins", "Group")

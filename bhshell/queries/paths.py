@@ -1,8 +1,8 @@
 """Attack-path finding.
 
 * `shortest(src, dst)` uses BH's native `GET /api/v2/graphs/shortest-path`
-  (BloodHound's own traversable-edge rules) and falls back to Cypher `shortestPath`.
-* `to_tier_zero(src)` / `owned_to_tier_zero()` use Cypher `allShortestPaths`.
+  (BloodHound's own traversable-edge rules) and falls back to Cypher.
+* Everything else, and `shortest` with excluded edges, uses Cypher `allShortestPaths`.
 * `route(src, waypoints, dst)` chains one of the above per leg.
 
 A disabled user or computer can only be passed through when the hop reaching it grants the
@@ -167,9 +167,10 @@ class PathService:
 
     def _cypher_shortest(self, src: Node, dst: Node, result: PathResult) -> Graph:
         ends = (f"s.objectid = {Q.lit(src.objectid)}", f"t.objectid = {Q.lit(dst.objectid)}")
+        limit = self.entities.max_results
         return self._first_working(lambda rel, filtered: (
-            f"MATCH p=shortestPath((s:Base)-{rel}->(t:Base))"
-            f"{Q.where(*ends, _no_disabled('t') if filtered else '')} RETURN p"
+            f"MATCH p=allShortestPaths((s:Base)-{rel}->(t:Base))"
+            f"{Q.where(*ends, _no_disabled('t') if filtered else '')} RETURN p LIMIT {limit}"
         ), result)
 
     def to_tier_zero(self, src: Node) -> PathResult:

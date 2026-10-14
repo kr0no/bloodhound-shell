@@ -149,7 +149,7 @@ def test_rest_result_without_properties_is_checked_and_retried_via_cypher(
     def handler(q: str) -> tuple[int, str]:
         if "n.objectid IN [" in q:
             return 200, payload(["2"], [])
-        if "shortestPath(" in q and "all(n IN nodes(p)" in q:
+        if "allShortestPaths(" in q and "all(n IN nodes(p)" in q:
             return 200, ENABLED_ONLY
         return 404, "{}"
     queries = cypher(handler)
