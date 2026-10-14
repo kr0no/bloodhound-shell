@@ -38,6 +38,10 @@ PRIMARY_KINDS = (
 TIER_ZERO_LABEL = "Tag_Tier_Zero"
 OWNED_LABEL = "Tag_Owned"
 
+# Well-known broad principals, matched by objectid suffix: Everyone, Anonymous Logon, Authenticated Users,
+# Domain Users, Domain Computers, Users, Pre-Windows 2000 Compatible Access.
+BROAD_SIDS = ("-S-1-1-0", "-S-1-5-7", "-S-1-5-11", "-513", "-515", "-S-1-5-32-545", "-S-1-5-32-554")
+
 # Extended key usages, by the OIDs BloodHound stores.
 EKU_NAMES = {
     "1.3.6.1.5.5.7.3.1": "Server Authentication",

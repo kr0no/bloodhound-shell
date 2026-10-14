@@ -16,7 +16,7 @@ from bhshell.queries import cypher as Q
 from bhshell.queries.marking import MarkingService
 from bhshell.queries.service import EntityService, parse_identifier
 from bhshell.shell.commands.cypher import parse_cypher_args
-from tests.conftest import BASE, HELPDESK, IT_ADMINS, JDOE, SVC_SQL, WS01, graph
+from tests.conftest import BASE, HELPDESK, IT_ADMINS, JDOE, NODES, SVC_SQL, WS01, graph
 
 
 @pytest.mark.parametrize("raw, kind, sam, domain, fqdn, oid", [
@@ -98,6 +98,28 @@ def test_outbound_lists_worst_rights_first_whichever_group_holds_them(
     monkeypatch.setattr(svc, "run_cypher", lambda query: held)
     rows = svc.view(jdoe, "outbound")[0].rows
     assert [(r.edge, r.via) for r in rows] == [("ADCSESC1", "IT ADMINS@CORP.LOCAL"), ("Enroll", "direct")]
+
+
+def test_inbound_lists_members_of_holding_groups_once(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    target = svc.resolve("svc_sql", "User")
+    users = {"kind": "Group", "kinds": ["Base", "Group"], "objectId": "S-1-5-21-1000-513",
+             "properties": {"name": "DOMAIN USERS@CORP.LOCAL", "objectid": "S-1-5-21-1000-513"}}
+    nodes = {**NODES, "u": users}
+    # IT ADMINS (JDOE inside) holds two critical rights; Domain Users (HELPDESK inside) holds one.
+    held = Graph.from_cypher(graph(["1", "2", "5", "7", "u"], [
+        ("2", "WriteDacl", "5"), ("2", "GenericAll", "5"), ("1", "MemberOf", "2"),
+        ("u", "GenericWrite", "5"), ("7", "MemberOf", "u")], nodes=nodes)["data"])
+    queries: list[str] = []
+    monkeypatch.setattr(svc, "run_cypher", lambda query: queries.append(query) or held)
+    rows = svc.view(target, "inbound")[0].rows
+    assert [(r.principal, r.edge, r.via) for r in rows] == [
+        ("IT ADMINS@CORP.LOCAL", "GenericAll", "direct"),
+        ("IT ADMINS@CORP.LOCAL", "WriteDacl", "direct"),
+        ("JDOE@CORP.LOCAL", "GenericAll", "IT ADMINS@CORP.LOCAL"),  # once, with the group's strongest right
+        ("DOMAIN USERS@CORP.LOCAL", "GenericWrite", "direct"),  # a broad group is not unrolled
+    ]
+    assert any("ENDS WITH '-513'" in q for q in queries)
 
 
 def test_outbound_falls_back_to_wildcard_query(client: BHClient) -> None:

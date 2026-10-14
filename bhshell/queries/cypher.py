@@ -140,6 +140,19 @@ def incoming_any(objectid: str, limit: int) -> str:
     return f"MATCH p=(s:Base)-[r]->(n:Base) WHERE n.objectid = {lit(objectid)} RETURN p LIMIT {limit}"
 
 
+def incoming_unrolled(objectid: str, edges: Iterable[str] | None, limit: int, skip: Iterable[str] = ()) -> str:
+    """Members (nested) of the groups holding `edges` (any edge when `None`) over the object.
+
+    Groups whose objectid ends with one of `skip` are listed but not unrolled.
+    """
+    broad = " OR ".join(f"x.objectid ENDS WITH {lit(s)}" for s in skip)
+    keep = f" AND all(x IN nodes(p) WHERE x = m OR x = n OR NOT ({broad}))" if broad else ""
+    return (
+        f"MATCH p=(m:Base)-[:{MEMBER_OF}*1..]->(g:Group)-{_rel(edges)}->(n:Base) "
+        f"WHERE n.objectid = {lit(objectid)}{keep} RETURN p LIMIT {limit}"
+    )
+
+
 def exec_rights_inbound_unrolled(objectid: str, limit: int, edges: Iterable[str] = EXEC_EDGES) -> str:
     return (
         f"MATCH p=(m:Base)-[:{MEMBER_OF}*1..]->(g:Group)-[r:{edge_types(edges)}]->(c:Computer) "

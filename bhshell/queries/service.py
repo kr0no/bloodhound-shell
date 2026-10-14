@@ -18,7 +18,7 @@ from bhshell.errors import (
     CypherDisabledError,
     NotFoundError,
 )
-from bhshell.models.entities import Graph, Node, SummaryField, literal_rows
+from bhshell.models.entities import BROAD_SIDS, Graph, Node, SummaryField, literal_rows
 from bhshell.models.results import Column, EntityReport, RelationshipRow, ViewResult
 from bhshell.queries import cypher as Q
 from bhshell.queries.adcs import ADCSService
@@ -458,24 +458,44 @@ class EntityService:
         )
 
     def inbound(self, node: Node) -> list[ViewResult]:
-        title = "Inbound object control (principals with rights over this object)"
+        title = "Inbound object control (principals with rights over this object, direct + via groups)"
 
         def via_cypher() -> list[ViewResult]:
             oid, limit = node.objectid, self.max_results
-            graphs = self._tiered(
-                lambda ks: Q.incoming(oid, ks, limit) if ks else Q.incoming_any(oid, limit), CONTROL_EDGES)
+            graphs = [
+                *self._tiered(lambda ks: Q.incoming(oid, ks, limit) if ks else Q.incoming_any(oid, limit),
+                              CONTROL_EDGES),
+                # Members of broad groups (Domain Users, Everyone, ...) are everyone: the group row says it.
+                *self._tiered(lambda ks: Q.incoming_unrolled(oid, ks, limit, BROAD_SIDS), CONTROL_EDGES),
+            ]
             g = Graph.union(graphs)
             rows: list[RelationshipRow] = []
             target = g.find(node.objectid)
             if target:
+                # Each holding group's most severe right: its members are listed once, with that right.
+                strongest: dict[str, str] = {}
                 for e in g.edges_to([target.id], CONTROL_EDGES):
                     src = g.nodes[e.source]
                     rows.append(RelationshipRow(
                         principal=src.name, principal_kind=src.kind, edge=e.kind, target=node.name,
-                        target_kind=node.kind, via="direct", tier_zero=src.tier_zero, owned=src.owned,
+                        target_kind=node.kind, via="direct", depth=0, tier_zero=src.tier_zero, owned=src.owned,
                         objectid=src.objectid,
                     ))
-            rows.sort(key=lambda r: (severity_rank(r.edge), not r.tier_zero, r.edge, r.principal))
+                    if src.kind == "Group" and not src.objectid.upper().endswith(BROAD_SIDS):
+                        best = strongest.get(e.source)
+                        if best is None or (severity_rank(e.kind), e.kind) < (severity_rank(best), best):
+                            strongest[e.source] = e.kind
+                for gid, edge in strongest.items():
+                    group = g.nodes[gid]
+                    for mid, (depth, _) in g.bfs(gid, MEMBER_OF, reverse=True).items():
+                        m = g.nodes[mid]
+                        rows.append(RelationshipRow(
+                            principal=m.name, principal_kind=m.kind, edge=edge, target=node.name,
+                            target_kind=node.kind, via=group.name, depth=depth, tier_zero=m.tier_zero,
+                            owned=m.owned, objectid=m.objectid,
+                        ))
+            rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.owned, not r.tier_zero, r.edge,
+                                     r.principal))
             return [self._capped(ViewResult("inbound", title, INBOUND_COLS, rows), *graphs)]
 
         return self._with_fallback(via_cypher, lambda why: self._rest_view(node, "inbound", title, INBOUND_COLS, why))

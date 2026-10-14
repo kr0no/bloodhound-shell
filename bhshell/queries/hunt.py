@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from bhshell.errors import ApiError, CypherDisabledError, UnsupportedFeature
-from bhshell.models.entities import OWNED_LABEL, TIER_ZERO_LABEL, Edge, Graph, Node, last_logon
+from bhshell.models.entities import BROAD_SIDS, OWNED_LABEL, TIER_ZERO_LABEL, Edge, Graph, Node, last_logon
 from bhshell.models.results import Column
 from bhshell.queries import cypher as Q
 from bhshell.queries.adcs import template_escs
@@ -46,9 +46,6 @@ from bhshell.queries.service import EntityService
 Row = dict[str, Any]
 HuntSeverity = Literal["critical", "high", "medium", "low", "info"]
 
-# Well-known broad principals, matched by objectid suffix: Everyone, Anonymous Logon, Authenticated Users,
-# Domain Users, Domain Computers, Users, Pre-Windows 2000 Compatible Access.
-BROAD_SIDS = ("-S-1-1-0", "-S-1-5-7", "-S-1-5-11", "-513", "-515", "-S-1-5-32-545", "-S-1-5-32-554")
 LEGACY_OS = ("2000", "2003", "2008", " XP", "VISTA", "WINDOWS 7", "2012", "WINDOWS 8")
 # Windows 10 left support in October 2025; the LTSC/LTSB editions are still supported.
 WINDOWS_10 = "WINDOWS 10"
