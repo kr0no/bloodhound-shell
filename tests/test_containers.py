@@ -12,7 +12,14 @@ from bhshell.client.client import BHClient
 from bhshell.errors import AmbiguousMatchError
 from bhshell.models.entities import Graph, Node
 from bhshell.queries import cypher as Q
-from bhshell.queries.containers import GPO_TARGET_KINDS, NO_TREE_DATA, applied_gpos, short_name
+from bhshell.queries.containers import (
+    GPO_TARGET_KINDS,
+    NO_TREE_DATA,
+    applied_gpos,
+    parent_dn,
+    short_name,
+    stale_contains,
+)
 from bhshell.queries.edges import GPO_EDIT_EDGES
 from bhshell.queries.gpos import reach
 from bhshell.queries.service import EntityService, parse_identifier
@@ -382,3 +389,36 @@ def test_gpo_rest_fallback_uses_bloodhound_lists() -> None:
         links, affected = report.views
         assert not links.rows and "needs Cypher" in links.notes[-1]
         assert [r.name for r in affected.rows] == ["WEB01.CORP.LOCAL"]
+
+
+def test_parent_dn_skips_escaped_commas() -> None:
+    assert parent_dn("CN=DOE\\, JOHN,OU=Staff,DC=corp,DC=local") == "OU=STAFF,DC=CORP,DC=LOCAL"
+    assert parent_dn("DC=CORP,DC=LOCAL") == "DC=LOCAL"
+
+
+def test_stale_contains_keeps_the_container_named_by_the_dn() -> None:
+    g = Graph.from_cypher(tree("st", "u", "jdoe", "w", "web01", edges=[
+        ("st", "Contains", "jdoe"), ("u", "Contains", "jdoe"),  # JDOE moved from USERS to STAFF
+        ("st", "Contains", "web01")])["data"])  # one container, even a wrong one, is kept
+    assert stale_contains(g) == {(USERS, JDOE)}
+
+
+@pytest.fixture
+def moved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JDOE moved from the USERS container to STAFF: BloodHound kept both Contains edges."""
+    monkeypatch.setitem(RESULTS, Q.moved_objects(L), tree("st", "u", "jdoe", edges=[
+        ("st", "Contains", "jdoe"), ("u", "Contains", "jdoe")]))
+    monkeypatch.setitem(RESULTS, Q.contained_counts(DOM, nested=True), literals(
+        counts(SERVERS, "OU", 2), counts(SERVERS, "Computer", 1, True, "Tag_Tier_Zero"),
+        counts(WEB, "Computer", 1, True), counts(STAFF, "User", 1, False),
+        counts(USERS, "User", 1, True, "Tag_Owned"), counts(USERS, "User", 1, False)))
+    monkeypatch.setitem(RESULTS, Q.containers_above(JDOE), tree("d", "st", "u", "jdoe", edges=[
+        ("d", "Contains", "st"), ("d", "Contains", "u"), ("st", "Contains", "jdoe"), ("u", "Contains", "jdoe")]))
+
+
+def test_moved_object_is_counted_and_located_once(svc: EntityService, moved: None) -> None:
+    rows = {r.label: r for r in svc.view(ou(svc, "corp.local"), "tree")[0].rows}
+    assert (rows["CORP.LOCAL"].users, rows["CORP.LOCAL"].enabled_users) == (2, 1)
+    assert rows["└─ USERS"].users == 1
+    assert [n.name for n in svc.containers.chain(svc.resolve("jdoe", "User"))] == [
+        "CORP.LOCAL", "STAFF@CORP.LOCAL"]

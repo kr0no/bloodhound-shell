@@ -197,6 +197,11 @@ def gp_links_above(objectid: str) -> str:
     )
 
 
+def moved_objects(limit: int) -> str:
+    """Objects in two containers or more: moved between two collections (see `containers.stale_contains`)."""
+    return f"MATCH p=(a:Base)-[:{CONTAINS}]->(n:Base)<-[:{CONTAINS}]-(b:Base) WHERE a <> b RETURN p LIMIT {limit}"
+
+
 def sub_containers(objectid: str, limit: int) -> str:
     """Every OU and container below the object."""
     return (

@@ -189,6 +189,10 @@ fallback gives the counts, the objects below an OU or a domain, and the GPOs lin
 above it (without enforcement or blocked inheritance); the tree and the GPOs applied to one object
 need Cypher.
 
+An object moved to another OU between two collections keeps both `Contains` edges in BloodHound,
+so it shows up in two places. `ou` and `gpo` place it, and count it, once: in the container its
+distinguished name names.
+
 ### Exploring GPOs
 
 `gpo NAME` shows where a GPO is linked, which users and computers it applies to and who can edit

@@ -127,7 +127,7 @@ class GPOService:
                 continue
             target = g.nodes[e.target]
             enforced = opt_bool(e.properties, "enforced")
-            tree = self.entities.run_cypher(Q.sub_containers(target.objectid, self.entities.max_results))
+            tree = self.entities.containers.tree_graph(Q.sub_containers(target.objectid, self.entities.max_results))
             reached, blocked = reach(target, tree, bool(enforced))
             links.append(Link(target, enforced, reached, blocked, tree))
         links.sort(key=lambda link: (link.target.kind != "Domain", link.target.name))
@@ -231,7 +231,8 @@ class GPOService:
                 for oid, (depth, location) in _locations(link).items():
                     if oid not in where or depth < where[oid][0]:
                         where[oid] = (depth, location)
-            g = self.entities.run_cypher(Q.children_of(where, GPO_TARGET_KINDS, self.entities.max_results))
+            g = self.entities.containers.tree_graph(
+                Q.children_of(where, GPO_TARGET_KINDS, self.entities.max_results))
             rows: dict[str, ContainedRow] = {}
             for e in g.edges:
                 if e.kind != CONTAINS or e.source not in g.nodes or e.target not in g.nodes:

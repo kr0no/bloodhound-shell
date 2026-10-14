@@ -52,6 +52,11 @@ _KIND_ORDER = {"User": 0, "Computer": 1, "Group": 2}
 _REST_CONTENTS = ("users", "computers", "groups")
 
 
+def _rdn_end(dn: str) -> int:
+    """Index of the comma ending the first RDN of `dn` (escaped commas skipped), or `len(dn)`."""
+    return next((i for i, ch in enumerate(dn) if ch == "," and (i == 0 or dn[i - 1] != "\\")), len(dn))
+
+
 def short_name(node: Node) -> str:
     """`SERVERS` for `OU=SERVERS,...` / `SERVERS@CORP.LOCAL`; a domain keeps its full name."""
     if node.kind == "Domain":
@@ -59,9 +64,35 @@ def short_name(node: Node) -> str:
     dn = str(node.properties.get("distinguishedname") or "")
     if "=" in dn:
         rdn = dn.split("=", 1)[1]
-        end = next((i for i, ch in enumerate(rdn) if ch == "," and (i == 0 or rdn[i - 1] != "\\")), len(rdn))
-        return rdn[:end].replace("\\,", ",")
+        return rdn[:_rdn_end(rdn)].replace("\\,", ",")
     return node.name.rsplit("@", 1)[0]
+
+
+def parent_dn(dn: str) -> str:
+    """`OU=WEB,DC=CORP,DC=LOCAL` for `CN=WEB01,OU=WEB,DC=CORP,DC=LOCAL`."""
+    return dn[_rdn_end(dn) + 1:].upper()
+
+
+def stale_contains(graph: Graph) -> set[tuple[str, str]]:
+    """`(container, object)` objectids of the `Contains` edges left over from an earlier collection.
+
+    An object moved between two collections keeps both edges in BloodHound. Its current container
+    is the one its distinguished name names. An object with a single container keeps it, even
+    when the two disagree: nothing tells which one is current.
+    """
+    parents: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == CONTAINS and e.source in graph.nodes and e.target in graph.nodes:
+            parents.setdefault(e.target, []).append(e.source)
+    stale: set[tuple[str, str]] = set()
+    for child, sources in parents.items():
+        node = graph.nodes[child]
+        dn = parent_dn(str(node.properties.get("distinguishedname") or ""))
+        current = [src for src in sources
+                   if str(graph.nodes[src].properties.get("distinguishedname") or "").upper() == dn]
+        if len(sources) > 1 and current:
+            stale |= {(graph.nodes[src].objectid, node.objectid) for src in sources if src not in current}
+    return stale
 
 
 def is_container(node: Node) -> bool:
@@ -182,9 +213,26 @@ class ContainerService:
     def __init__(self, entities: EntityService) -> None:
         self.entities = entities
 
+    def stale(self) -> tuple[set[tuple[str, str]], Graph]:
+        """The `Contains` edges left over from earlier collections, and the objects they lead to."""
+        g = self.entities.run_cypher(Q.moved_objects(self.entities.max_results))
+        return stale_contains(g), g
+
+    def tree_graph(self, query: str) -> Graph:
+        """The result of a query over `Contains` edges, without the stale ones."""
+        g = self.entities.run_cypher(query)
+        stale, _ = self.stale()
+        if not stale:
+            return g
+        oid = {nid: n.objectid for nid, n in g.nodes.items()}
+        current = Graph(g.nodes, [e for e in g.edges if e.kind != CONTAINS
+                                  or (oid.get(e.source), oid.get(e.target)) not in stale])
+        current.query = g.query
+        return current
+
     def chain(self, node: Node) -> list[Node]:
         """The containers holding the object, domain first (empty without OU data)."""
-        return chain_to(self.entities.run_cypher(Q.containers_above(node.objectid)), node.objectid)
+        return chain_to(self.tree_graph(Q.containers_above(node.objectid)), node.objectid)
 
     def counts(self, node: Node) -> dict[str, Counts] | None:
         """Direct children of the node and of each container below it, by parent objectid.
@@ -201,6 +249,13 @@ class ContainerService:
                 out.setdefault(str(row.get("parent")), Counts()).add(
                     list(kinds) if isinstance(kinds, list) else [str(kinds)], row.get("enabled"),
                     int(row.get("total") or 0))
+        # A moved object is counted under its current container and under the stale one: drop the latter.
+        stale, moved = self.stale()
+        by_oid = {n.objectid: n for n in moved.nodes.values()}
+        for parent, child in stale:
+            if parent in out and child in by_oid:
+                obj = by_oid[child]
+                out[parent].add(obj.kinds, obj.properties.get("enabled"), -1)
         return out
 
     def _links_to(self, node: Node) -> Graph:
@@ -244,7 +299,7 @@ class ContainerService:
         title = "OU tree (counts cover everything below each entry)"
 
         def via_cypher() -> list[ViewResult]:
-            g = self.entities.run_cypher(Q.sub_containers(node.objectid, self.entities.max_results))
+            g = self.tree_graph(Q.sub_containers(node.objectid, self.entities.max_results))
             counts = self.counts(node)
             link_rows = self.entities.scalar_rows(Q.gp_link_counts(node.objectid)) or []
             links = {str(r.get("parent")): int(r.get("total") or 0) for r in link_rows}
@@ -265,7 +320,7 @@ class ContainerService:
         title = "Objects below (all levels)"
 
         def via_cypher() -> list[ViewResult]:
-            g = self.entities.run_cypher(Q.contained_objects(node.objectid, self.entities.max_results))
+            g = self.tree_graph(Q.contained_objects(node.objectid, self.entities.max_results))
             rows: list[ContainedRow] = []
             start = g.find(node.objectid)
             if start:
