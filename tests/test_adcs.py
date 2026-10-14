@@ -8,7 +8,7 @@ import responses
 
 from bhshell.client.client import BHClient
 from bhshell.errors import AmbiguousMatchError
-from bhshell.models.entities import Graph
+from bhshell.models.entities import ADObject, Graph, Node
 from bhshell.queries import cypher as Q
 from bhshell.queries.adcs import template_escs
 from bhshell.queries.edges import (
@@ -189,6 +189,7 @@ def test_ca_summary(svc: EntityService) -> None:
     fields = {f.label: f.value for f in svc.report(ca, [], show_summary=True).summary()}
     assert fields["User Specified SAN (ESC6)"] is True
     assert fields["Role Separation"] == "not collected"
+    assert "CA Security" not in fields  # collected unless casecuritycollected is false
     assert fields["Relayable Web Enrollment (ESC8)"] is True
     assert fields["Host"] == ["CA01.CORP.LOCAL"]
     assert fields["Admins of the host (outside Tier Zero)"] == ["HELPDESK@CORP.LOCAL (owned)"]
@@ -251,3 +252,9 @@ def test_hunt_takeover_includes_esc14() -> None:
     rows = CHECKS_BY_ID["object-takeover"].rows(
         _graph(NODES, [("helpdesk", "WriteAltSecurityIdentities", "jdoe")]), HuntOptions())
     assert rows[0]["technique"] == "ESC14 (explicit certificate mapping)"
+
+
+def test_ca_summary_says_when_its_security_was_not_collected() -> None:
+    ca = Node.from_cypher("x", node("x", "EnterpriseCA", "X-CA@CORP.LOCAL", casecuritycollected=False))
+    fields = {f.label: f.value for f in ADObject.wrap(ca).summary()}
+    assert fields["CA Security"].startswith("not collected")

@@ -535,6 +535,8 @@ class EnterpriseCA(ADObject):
             SummaryField("Certificate Thumbprint", p.get("certthumbprint") or ""),
             _registry_flag(p, "isuserspecifiessanenabled", "isuserspecifiessanenabledcollected",
                            "User Specified SAN (ESC6)", "high"),
+            *([SummaryField("CA Security", "not collected: rights granted only on the CA may be missing")]
+              if p.get("casecuritycollected") is False else []),
             _registry_flag(p, "roleseparationenabled", "roleseparationenabledcollected", "Role Separation"),
             _registry_flag(p, "hasenrollmentagentrestrictions", "enrollmentagentrestrictionscollected",
                            "Enrollment Agent Restrictions"),
