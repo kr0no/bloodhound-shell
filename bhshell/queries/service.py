@@ -445,7 +445,7 @@ class EntityService:
                         via="direct" if depth == 1 else g.nodes[parent].name, depth=depth,
                         tier_zero=m.tier_zero, owned=m.owned, objectid=m.objectid,
                     ))
-            rows.sort(key=lambda r: (r.depth or 0, r.principal_kind != "User", r.principal))
+            rows.sort(key=lambda r: (r.depth or 0, not r.owned, r.principal_kind != "User", r.principal))
             return [self._capped(ViewResult("members", title, MEMBER_COLS, rows), g)]
 
         return self._with_fallback(via_cypher, lambda why: self._rest_view(node, "members", title, MEMBER_COLS, why))
@@ -621,7 +621,8 @@ class EntityService:
                             principal=m.name, principal_kind=m.kind, edge=e.kind, target=node.name,
                             via=src.name, depth=depth, tier_zero=m.tier_zero, owned=m.owned, objectid=m.objectid,
                         ))
-        rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.tier_zero, r.edge, r.principal))
+        rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.owned, not r.tier_zero, r.edge,
+                                 r.principal))
         return self._capped(ViewResult("privs_inbound", title, INBOUND_COLS, rows), *graphs)
 
     def _rest_view(self, node: Node, key: str, title: str, columns: list[Column], why: str) -> list[ViewResult]:

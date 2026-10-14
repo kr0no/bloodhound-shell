@@ -198,6 +198,20 @@ def test_computer_privs_inbound_unrolls_group_members(client: BHClient) -> None:
         ("IT ADMINS@CORP.LOCAL", "direct"), ("JDOE@CORP.LOCAL", "IT ADMINS@CORP.LOCAL")]
 
 
+def test_owned_principals_come_first(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    group, ws01 = svc.resolve("IT Admins", "Group"), svc.resolve("WS01", "Computer")
+    # JDOE and SVC_SQL are direct members of IT ADMINS, which is admin of WS01; SVC_SQL is owned.
+    held = Graph.from_cypher(graph(["1", "2", "4", "5"], [
+        ("1", "MemberOf", "2"), ("5", "MemberOf", "2"), ("2", "AdminTo", "4")])["data"])
+    held.nodes["5"].owned = True
+    monkeypatch.setattr(svc, "run_cypher", lambda query: held)
+    members = svc.view(group, "members")[0].rows
+    assert [r.principal for r in members] == ["SVC_SQL@CORP.LOCAL", "JDOE@CORP.LOCAL"]
+    admins = svc.view(ws01, "privs")[1].rows
+    assert [r.principal for r in admins] == ["IT ADMINS@CORP.LOCAL", "SVC_SQL@CORP.LOCAL", "JDOE@CORP.LOCAL"]
+
+
 def test_members_view_applies_to_groups(client: BHClient) -> None:
     svc = EntityService(client)
     node = svc.resolve("IT Admins", "Group")
