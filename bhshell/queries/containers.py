@@ -146,10 +146,15 @@ class Counts:
         return self.users + self.computers + self.groups + self.other
 
     def summary(self) -> list[SummaryField]:
-        return [
+        fields = [
             SummaryField("Users below (enabled)", f"{self.users} ({self.enabled_users})"),
             SummaryField("Computers below (enabled)", f"{self.computers} ({self.enabled_computers})"),
             SummaryField("Groups below", self.groups),
+        ]
+        if self.other:  # certificate templates, CAs, GPOs, ... (mostly under CN=Configuration and CN=System)
+            fields.append(SummaryField("Other objects below", self.other))
+        return [
+            *fields,
             SummaryField("OUs / containers below", self.containers),
             SummaryField("Tier Zero objects below", self.tier_zero, risk="medium" if self.tier_zero else "none"),
             SummaryField("Owned objects below", self.owned, risk="info" if self.owned else "none"),

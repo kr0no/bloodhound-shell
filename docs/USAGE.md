@@ -113,7 +113,7 @@ user CORP\jdoe -G                                  # ... or to one user
 
 | Flag | View |
 |---|---|
-| (none) | Summary: distinguished name, whether the OU blocks GPO inheritance, creation date, location (`CORP.LOCAL > SERVERS`), users / computers / groups below it at any depth (enabled ones in brackets), OUs and containers below it, Tier Zero and owned objects below it, and the GPOs linked to it (`(enforced)` marked) |
+| (none) | Summary: distinguished name, whether the OU blocks GPO inheritance, creation date, location (`CORP.LOCAL > SERVERS`), users / computers / groups below it at any depth (enabled ones in brackets), other objects below it (certificate templates, CAs, ...; only when there are some), OUs and containers below it, Tier Zero and owned objects below it, and the GPOs linked to it (`(enforced)` marked) |
 | `-t, --tree` | The OUs and containers below it, drawn as a tree with the object itself first |
 | `-c, --contents` | Every object below it at any depth (OUs and containers excluded) |
 | `-G, --gpos` | The GPOs applied to the objects in it, in precedence order, and who outside Tier Zero can edit them |

@@ -15,6 +15,7 @@ from bhshell.queries import cypher as Q
 from bhshell.queries.containers import (
     GPO_TARGET_KINDS,
     NO_TREE_DATA,
+    Counts,
     applied_gpos,
     parent_dn,
     short_name,
@@ -422,3 +423,13 @@ def test_moved_object_is_counted_and_located_once(svc: EntityService, moved: Non
     assert rows["└─ USERS"].users == 1
     assert [n.name for n in svc.containers.chain(svc.resolve("jdoe", "User"))] == [
         "CORP.LOCAL", "STAFF@CORP.LOCAL"]
+
+
+def test_summary_counts_other_objects_only_when_there_are_some() -> None:
+    templates = Counts()
+    templates.add(["Base", "CertTemplate", "Tag_Tier_Zero"], None, 63)
+    fields = {f.label: f.value for f in templates.summary()}
+    assert fields["Other objects below"] == 63 and fields["Tier Zero objects below"] == 63
+    users = Counts()
+    users.add(["Base", "User"], True, 2)
+    assert "Other objects below" not in {f.label for f in users.summary()}
