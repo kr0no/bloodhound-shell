@@ -31,6 +31,7 @@ from bhshell.queries.edges import (
     severity,
     severity_rank,
 )
+from bhshell.queries.gpos import GPOService
 
 T = TypeVar("T")
 
@@ -50,14 +51,17 @@ VIEWS: dict[str, tuple[str, ...]] = {
     "members": ("Group",),
     "tree": CONTAINER_KINDS,
     "contents": CONTAINER_KINDS,
+    "links": ("GPO",),
+    "affected": ("GPO",),
     "outbound": ENTITY_KINDS,
-    "inbound": (*ENTITY_KINDS, *CONTAINER_KINDS),
+    "inbound": (*ENTITY_KINDS, *CONTAINER_KINDS, "GPO"),
     "sessions": ENTITY_KINDS,
     "privs": ENTITY_KINDS,
     "gpos": (*GPO_TARGET_KINDS, *CONTAINER_KINDS),
 }
-# Views served by `ContainerService`.
+# Views served by `ContainerService` and `GPOService`.
 CONTAINER_VIEWS = frozenset({"tree", "contents", "gpos"})
+GPO_VIEWS = frozenset({"links", "affected"})
 
 FLAGS = [Column("T0", "tier_zero", "t0"), Column("Owned", "owned", "owned")]
 DEPTH, VIA = Column("Depth", "depth", "depth"), Column("Via", "via", "via")
@@ -95,6 +99,7 @@ REST_ROUTES: dict[tuple[str, str], list[RestRoute]] = {
     ("OU", "inbound"): [("controllers", "Controls", "in")],
     ("Container", "inbound"): [("controllers", "Controls", "in")],
     ("Domain", "inbound"): [("controllers", "Controls", "in")],
+    ("GPO", "inbound"): [("controllers", "Controls", "in")],
     ("User", "sessions"): [("sessions", HAS_SESSION, "out")],
     ("Computer", "sessions"): [("sessions", HAS_SESSION, "in")],
     ("Group", "sessions"): [("sessions", HAS_SESSION, "out")],
@@ -197,6 +202,7 @@ class EntityService:
         self._cache: dict[str, Graph] = {}
         self._scalars: dict[str, list[dict[str, Any]] | None] = {}
         self.containers = ContainerService(self)
+        self.gpo = GPOService(self)
 
     def reset_cache(self) -> None:
         self._cache.clear()
@@ -354,13 +360,15 @@ class EntityService:
         report = EntityReport(node=node, show_summary=show_summary)
         if show_summary and node.kind in CONTAINER_KINDS:
             report.extra = self.containers.summary(node)
+        elif show_summary and node.kind == "GPO":
+            report.extra = self.gpo.summary(node)
         for key in views:
             if node.kind in VIEWS.get(key, ()):
                 report.views.extend(self.view(node, key))
         return report
 
     def view(self, node: Node, key: str) -> list[ViewResult]:
-        owner = self.containers if key in CONTAINER_VIEWS else self
+        owner = self.containers if key in CONTAINER_VIEWS else self.gpo if key in GPO_VIEWS else self
         return getattr(owner, key)(node)  # every VIEWS key is a method
 
     def groups(self, node: Node) -> list[ViewResult]:

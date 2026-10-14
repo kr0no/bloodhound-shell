@@ -1,4 +1,4 @@
-"""Entity lookup commands: user, computer, group, lookup, ou."""
+"""Entity lookup commands: user, computer, group, lookup, ou, gpo."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from bhshell.shell.commands.base import BaseCommands, add_output_args
 
 _NAME_HELP = "samaccountname, NAME@DOMAIN, DOMAIN\\NAME, FQDN (computers), SID or distinguished name"
 _OU_NAME_HELP = "NAME, NAME@DOMAIN, distinguished name (OU=...,DC=...), object ID, or a domain (corp.local)"
+_GPO_NAME_HELP = "display name, NAME@DOMAIN, distinguished name (CN={GUID},CN=POLICIES,...) or object ID"
 
 
 def _entity_parser(kind: str | None) -> Cmd2ArgumentParser:
@@ -68,6 +69,32 @@ def _ou_parser() -> Cmd2ArgumentParser:
                             "Tier Zero can edit them")
     views.add_argument("-I", "--inbound", action="store_true",
                        help="principals with dangerous rights over it (WriteGPLink, GenericAll, ...)")
+    views.add_argument("-a", "--all", action="store_true", help="summary + every view")
+    _add_view_output_args(p)
+    return p
+
+
+def _gpo_parser() -> Cmd2ArgumentParser:
+    p = Cmd2ArgumentParser(
+        description="Show where a GPO is linked, which users and computers it applies to and who can edit it.",
+        epilog="gpo 'Default Domain Policy' -d corp.local\n"
+               "gpo 'WEB HARDENING@corp.local' -c   the users and computers it applies to\n\n"
+               "Without view flags the summary is shown (links, objects affected, editors outside Tier Zero).\n"
+               "With view flags only those views are shown; --all shows the summary plus every view.\n"
+               "'hunt gpo-control' lists the GPOs that principals outside Tier Zero can edit.",
+        formatter_class=RawDescriptionCmd2HelpFormatter,
+    )
+    p.add_argument("name", help=_GPO_NAME_HELP, choices_provider=BaseCommands.recent_names)
+    p.add_argument("-d", "--domain", help="restrict the lookup to a domain (FQDN or NetBIOS)")
+
+    views = p.add_argument_group("views")
+    views.add_argument("-l", "--links", action="store_true",
+                       help="domains and OUs it is linked to, whether each link is enforced, what it reaches "
+                            "and where blocked inheritance stops it")
+    views.add_argument("-c", "--affected", action="store_true",
+                       help="users and computers it applies to, with their location")
+    views.add_argument("-I", "--inbound", action="store_true",
+                       help="principals with dangerous rights over it (GenericAll, WriteDacl, ...)")
     views.add_argument("-a", "--all", action="store_true", help="summary + every view")
     _add_view_output_args(p)
     return p
@@ -129,3 +156,8 @@ class EntityCommands(BaseCommands):
     def do_ou(self, args: argparse.Namespace) -> None:
         """Explore an OU, container or domain: tree, contents, applied GPOs, inbound control."""
         self._run(args, None, CONTAINER_KINDS)
+
+    @with_argparser(_gpo_parser)
+    def do_gpo(self, args: argparse.Namespace) -> None:
+        """Explore a GPO: where it is linked, what it applies to, who can edit it."""
+        self._run(args, None, ("GPO",))

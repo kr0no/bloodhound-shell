@@ -61,7 +61,7 @@ def fmt_field(f: SummaryField) -> Text:
         return fmt_date(f.value)
     if f.type == "list":
         items = f.value or []
-        return Text("\n".join(map(str, items)) if items else "-", style="" if items else "dim")
+        return Text("\n".join(map(str, items)) if items else "-", style=RISK_STYLE.get(f.risk, "") if items else "dim")
     text = str(f.value) if f.value not in (None, "") else "-"
     return Text(text, style=RISK_STYLE.get(f.risk, "") if text != "-" else "dim")
 

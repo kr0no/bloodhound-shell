@@ -81,6 +81,9 @@ class Counts:
     containers: int = 0
     tier_zero: int = 0
     owned: int = 0
+    # Tier Zero and owned users and computers: the objects a GPO applies to.
+    tier_zero_targets: int = 0
+    owned_targets: int = 0
 
     def add(self, kinds: list[str], enabled: Any, total: int) -> None:
         if "OU" in kinds or "Container" in kinds:
@@ -96,8 +99,13 @@ class Counts:
             self.groups += total
         else:
             self.other += total
-        self.tier_zero += total if TIER_ZERO_LABEL in kinds else 0
-        self.owned += total if OWNED_LABEL in kinds else 0
+        tier_zero = total if TIER_ZERO_LABEL in kinds else 0
+        owned = total if OWNED_LABEL in kinds else 0
+        self.tier_zero += tier_zero
+        self.owned += owned
+        if "User" in kinds or "Computer" in kinds:
+            self.tier_zero_targets += tier_zero
+            self.owned_targets += owned
 
     def __add__(self, other: Counts) -> Counts:
         return Counts(**{f.name: getattr(self, f.name) + getattr(other, f.name) for f in fields(self)})
@@ -251,7 +259,7 @@ class ContainerService:
                 view.notes.append(NO_TREE_DATA)
             return [self.entities._capped(view, g)]
 
-        return self.entities._with_fallback(via_cypher, lambda why: [_rest_unavailable("tree", title, TREE_COLS, why)])
+        return self.entities._with_fallback(via_cypher, lambda why: [rest_unavailable("tree", title, TREE_COLS, why)])
 
     def contents(self, node: Node) -> list[ViewResult]:
         title = "Objects below (all levels)"
@@ -268,7 +276,7 @@ class ContainerService:
                         continue
                     rows.append(ContainedRow(
                         name=obj.name, kind=obj.kind, enabled=opt_bool(obj.properties, "enabled"),
-                        location=_location(g, reached, start.id, parent), depth=depth,
+                        location=location_below(g, reached, start.id, parent), depth=depth,
                         tier_zero=obj.tier_zero, owned=obj.owned,
                         distinguishedname=str(obj.properties.get("distinguishedname") or ""), objectid=obj.objectid,
                     ))
@@ -278,7 +286,7 @@ class ContainerService:
 
         def via_rest(why: str) -> list[ViewResult]:
             if node.kind not in ("OU", "Domain"):
-                return [_rest_unavailable("contents", title, CONTENT_COLS, why)]
+                return [rest_unavailable("contents", title, CONTENT_COLS, why)]
             view = ViewResult("contents", title, CONTENT_COLS, backend="rest")
             if why:
                 view.notes.append(f"Cypher query failed ({why}); used REST fallback.")
@@ -322,7 +330,7 @@ class ContainerService:
 
         def via_rest(why: str) -> list[ViewResult]:
             if node.kind != "OU":
-                return [_rest_unavailable("gpos", title, GPO_COLS, why)]
+                return [rest_unavailable("gpos", title, GPO_COLS, why)]
             view = ViewResult("gpos", "GPOs linked to this OU or above it", GPO_COLS, backend="rest")
             if why:
                 view.notes.append(f"Cypher query failed ({why}); used REST fallback.")
@@ -342,23 +350,30 @@ class ContainerService:
 
         return self.entities._with_fallback(via_cypher, via_rest)
 
-    def _add_editors(self, view: ViewResult) -> None:
-        """Fill `editable_by` with the principals outside Tier Zero that can edit each GPO."""
-        ids = {r.objectid for r in view.rows}
+    def editors(self, gpo_ids: set[str]) -> tuple[dict[str, list[str]], Graph]:
+        """The principals outside Tier Zero that can edit each GPO (owned first), and the graph they came from."""
         limit = self.entities.max_results
         try:
-            g = self.entities.run_cypher(Q.controllers_outside_t0(ids, GPO_EDIT_EDGES, limit))
+            g = self.entities.run_cypher(Q.controllers_outside_t0(gpo_ids, GPO_EDIT_EDGES, limit))
         except ApiError:  # an edge kind unknown to this server: filter locally instead
-            g = self.entities.run_cypher(Q.controllers_outside_t0(ids, None, limit))
-        editors: dict[str, dict[str, bool]] = {}
+            g = self.entities.run_cypher(Q.controllers_outside_t0(gpo_ids, None, limit))
+        found: dict[str, dict[str, bool]] = {}
         for e in g.edges:
             if e.kind in GPO_EDIT_EDGES and e.source in g.nodes and e.target in g.nodes:
                 src = g.nodes[e.source]
-                editors.setdefault(g.nodes[e.target].objectid, {})[src.name] = src.owned
+                found.setdefault(g.nodes[e.target].objectid, {})[src.name] = src.owned
+        editors = {
+            oid: [f"{name} (owned)" if owned else name
+                  for name, owned in sorted(names.items(), key=lambda kv: (not kv[1], kv[0]))]
+            for oid, names in found.items()
+        }
+        return editors, g
+
+    def _add_editors(self, view: ViewResult) -> None:
+        """Fill `editable_by` with the principals outside Tier Zero that can edit each GPO."""
+        editors, g = self.editors({r.objectid for r in view.rows})
         for row in view.rows:
-            found = editors.get(row.objectid, {})
-            row.editable_by = [f"{name} (owned)" if owned else name
-                               for name, owned in sorted(found.items(), key=lambda kv: (not kv[1], kv[0]))]
+            row.editable_by = editors.get(row.objectid, [])
         self.entities._capped(view, g)
 
 
@@ -419,7 +434,7 @@ def _tree_rows(root: Node, graph: Graph, counts: dict[str, Counts] | None,
     return rows, hidden
 
 
-def _location(graph: Graph, reached: dict[str, tuple[int, str]], start: str, parent: str) -> str:
+def location_below(graph: Graph, reached: dict[str, tuple[int, str]], start: str, parent: str) -> str:
     """`WEB/DMZ`: the containers from just below `start` down to `parent`; "direct" when `parent` is `start`."""
     names: list[str] = []
     current = parent
@@ -429,7 +444,7 @@ def _location(graph: Graph, reached: dict[str, tuple[int, str]], start: str, par
     return "/".join(reversed(names)) or "direct"
 
 
-def _rest_unavailable(key: str, title: str, columns: list[Column], why: str) -> ViewResult:
+def rest_unavailable(key: str, title: str, columns: list[Column], why: str) -> ViewResult:
     view = ViewResult(key, title, columns, backend="rest")
     if why:
         view.notes.append(f"Cypher query failed ({why}).")

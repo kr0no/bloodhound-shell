@@ -24,6 +24,7 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 | | `config [KEY [VALUE]]` | Show or change persisted settings |
 | Entities | `user NAME`, `computer NAME`, `group NAME`, `lookup NAME` | Triage summary + views |
 | | `ou NAME [-t] [-c] [-G] [-I]` | OUs, containers and domains: tree, objects below, applied GPOs, inbound control; see [Exploring OUs](#exploring-ous) |
+| | `gpo NAME [-l] [-c] [-I]` | GPOs: links, the users and computers they apply to, who can edit them; see [Exploring GPOs](#exploring-gpos) |
 | | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
 | Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables |
 | Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
@@ -169,7 +170,8 @@ order within one OU, so a GPO listed as applying may still be filtered out on th
 #### Where `ou` fits
 
 * `hunt gpo-control` finds principals outside Tier Zero that can edit a GPO or link one to an OU.
-  `ou NAME -G`, or `computer NAME -G` on a target, shows which of those GPOs reach it.
+  `ou NAME -G`, or `computer NAME -G` on a target, shows which of those GPOs reach it, and
+  `gpo NAME` shows everything one of them reaches.
 * `ou NAME -I` shows who holds `WriteGPLink` on an OU (they can link a GPO they control to it) or
   `GenericAll` / `WriteDacl` (control that extends to the objects inheriting the OU's ACEs).
 * `path` already walks `GPLink` and `Contains` edges, so `path SRC TARGET` finds GPO-based routes;
@@ -185,6 +187,45 @@ has no OU data, and the views say so instead of showing empty results. Without C
 fallback gives the counts, the objects below an OU or a domain, and the GPOs linked to an OU or
 above it (without enforcement or blocked inheritance); the tree and the GPOs applied to one object
 need Cypher.
+
+### Exploring GPOs
+
+`gpo NAME` shows where a GPO is linked, which users and computers it applies to and who can edit
+it. It is the next step after `hunt gpo-control`: once you know someone can edit a GPO, `gpo`
+tells you what editing it gets you. `NAME` is the display name, `NAME@corp.local`, the
+distinguished name (`CN={31B2F340-...},CN=Policies,CN=System,DC=corp,DC=local`) or the object ID.
+Display names often contain spaces, so quote them.
+
+```
+gpo 'Default Domain Policy' -d corp.local          # summary
+gpo 'WEB HARDENING@corp.local' -l                  # where it is linked and what each link reaches
+gpo 'WEB HARDENING@corp.local' -c -o web.csv       # every user and computer it applies to
+gpo 'WEB HARDENING@corp.local' -I                  # everyone with rights over it, Tier Zero included
+```
+
+| Flag | View |
+|---|---|
+| (none) | Summary: distinguished name, SYSVOL path, creation date, where it is linked (`(enforced)` marked), the OUs where blocked inheritance stops it, the computers and users it applies to (enabled ones in brackets), how many of them are Tier Zero or owned, and the principals outside Tier Zero that can edit it |
+| `-l, --links` | One row per link: whether it is enforced, the users and computers it reaches, the Tier Zero and owned ones among them, and the OUs that stop it |
+| `-c, --affected` | Every user and computer it applies to: Tier Zero first, then owned, computers before users. **Location** is the path from the linked domain or OU down to the object's container (`CORP.LOCAL/STAFF`) |
+| `-I, --inbound` | Principals with dangerous rights over it (as for users) |
+| `-a, --all` | Summary plus every view |
+| `-d`, `-n`, `--json`, `-o FILE` | As for the other entity commands |
+
+A link applies to the linked domain or OU and to everything below it, except below an OU that
+blocks inheritance, unless the link is enforced. An object reached by two links is listed once,
+under the closer one. Groups are left out, since GPOs only apply to users and computers. The
+computer settings of a GPO run as SYSTEM on every computer in its scope, so a Tier Zero computer
+there makes the GPO a route to Tier Zero.
+
+BloodHound's own GPO panel also counts the objects placed directly in an OU that blocks
+inheritance. Windows does not apply the GPO to them, and `gpo` does not count them, so its numbers
+can be lower than BloodHound's for a GPO linked above such an OU. Security filtering and WMI
+filters are not collected, as for `ou -G`.
+
+The list stops at `max_results` objects, with a note giving the server's real total. Without
+Cypher, the summary counts and the `-c` list come from BloodHound's REST endpoints (so they
+include those extra objects, and have no location), and `-l` is not available.
 
 ## Analysis
 
@@ -370,7 +411,7 @@ exist is reported in a note under `query list`.
 ```
 bhshell/cli.py          command-line options
 bhshell/client/         HTTP transport: JWT and HMAC auth, retries, error mapping, pagination
-bhshell/models/         Node/Edge/Graph, User/Computer/Group/OU summaries, view results
+bhshell/models/         Node/Edge/Graph, User/Computer/Group/OU/GPO summaries, view results
 bhshell/queries/        Cypher templates, edge taxonomy, and the logic behind each command
 bhshell/render/         rich tables and panels, path graphs, SVG/PNG, JSON/CSV export
 bhshell/shell/          the cmd2 app and one command set per area
@@ -379,7 +420,8 @@ bhshell/shell/          the cmd2 app and one command set per area
 Everything goes through `POST /api/v2/graphs/cypher`. If Cypher is disabled, the views fall back
 to the per-entity REST endpoints, which can't tell ACL rights apart (they all show as `Controls`).
 The OU tree and the applied GPOs have no REST equivalent; without Cypher, `ou` shows the counts,
-the objects below an OU and the GPOs linked to it or above it.
+the objects below an OU and the GPOs linked to it or above it, and `gpo` shows BloodHound's own
+counts and list of the objects a GPO applies to.
 
 Rights are queried per severity, each with its own `LIMIT max_results`, so a flood of low-impact
 edges can't push `GetChangesAll` out of the result. When a query hits the limit, the shell asks

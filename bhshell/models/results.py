@@ -44,6 +44,14 @@ def _with_enabled(total: int, enabled: int) -> str:
     return f"{total} ({enabled})" if total else "0"
 
 
+def _show_enabled(out: dict[str, Any]) -> dict[str, Any]:
+    """`users` and `computers` as "total (enabled)"."""
+    for key in ("users", "computers"):
+        total, enabled = out[key], out[f"enabled_{key}"]
+        out[key] = None if total is None else _with_enabled(total, enabled or 0)
+    return out
+
+
 @dataclass
 class ContainerRow(Row):
     """One OU or container of a `tree` view; the counts cover everything below it."""
@@ -71,11 +79,7 @@ class ContainerRow(Row):
         return {k: v for k, v in asdict(self).items() if k != "label"}
 
     def as_display(self) -> dict[str, Any]:
-        out = asdict(self)
-        for key in ("users", "computers"):
-            total, enabled = out[key], out[f"enabled_{key}"]
-            out[key] = None if total is None else _with_enabled(total, enabled or 0)
-        return out
+        return _show_enabled(asdict(self))
 
 
 @dataclass
@@ -123,6 +127,30 @@ class GPOLinkRow(Row):
             shown = [*shown, f"+{len(self.editable_by) - len(shown)} more"]
         out["editable_by"] = shown
         return out
+
+
+@dataclass
+class GPOTargetRow(Row):
+    """A domain or OU a GPO is linked to (`links` view); the counts cover what the link applies to."""
+
+    linked_to: str
+    kind: str
+    enforced: bool | None = None
+    users: int | None = None
+    enabled_users: int | None = None
+    computers: int | None = None
+    enabled_computers: int | None = None
+    tier_zero_affected: int | None = None
+    owned_affected: int | None = None
+    # OUs below the linked one that block inheritance, and so stop a link that is not enforced.
+    blocked_at: list[str] = field(default_factory=list)
+    tier_zero: bool = False
+    owned: bool = False
+    distinguishedname: str = ""
+    objectid: str = ""
+
+    def as_display(self) -> dict[str, Any]:
+        return _show_enabled(asdict(self))
 
 
 @dataclass(frozen=True)

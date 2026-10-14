@@ -12,8 +12,9 @@ from bhshell.client.client import BHClient
 from bhshell.errors import AmbiguousMatchError
 from bhshell.models.entities import Graph, Node
 from bhshell.queries import cypher as Q
-from bhshell.queries.containers import NO_TREE_DATA, applied_gpos, short_name
+from bhshell.queries.containers import GPO_TARGET_KINDS, NO_TREE_DATA, applied_gpos, short_name
 from bhshell.queries.edges import GPO_EDIT_EDGES
+from bhshell.queries.gpos import reach
 from bhshell.queries.service import EntityService, parse_identifier
 from bhshell.shell.app import BHShell
 from tests.conftest import BASE, L, graph, run
@@ -121,6 +122,18 @@ RESULTS: dict[str, dict[str, Any]] = {
     Q.gp_links_to(DOM): tree("d", "ddp", "wall", edges=DOMAIN_LINKS, props=LINK_PROPS),
     Q.gp_link_counts(DOM): literals({"parent": SERVERS, "total": 1}, {"parent": WEB, "total": 1}),
     # JDOE: in a domain collected without containers
+    # GPOs
+    Q.by_name(Q.name_conditions("WALLPAPER", None, None), None, 100): tree("wall", edges=[]),
+    Q.gp_links_from(WALLPAPER): tree("wall", "d", edges=[("wall", "GPLink", "d")]),
+    Q.children_of({DOM, STAFF, USERS, SYSTEM}, GPO_TARGET_KINDS, L): tree("st", "u", "jdoe", "helpdesk", edges=[
+        ("st", "Contains", "jdoe"), ("u", "Contains", "helpdesk")]),
+    Q.by_name(Q.name_conditions("WEB HARDENING", "WEB HARDENING@CORP.LOCAL", None), None, 100): tree(
+        "webgpo", edges=[]),
+    Q.gp_links_from(WEBGPO): tree("webgpo", "w", edges=[("webgpo", "GPLink", "w")]),
+    Q.contained_counts(WEB, nested=False): literals(counts(WEB, "Computer", 1, True)),
+    Q.controllers_outside_t0({WEBGPO}, GPO_EDIT_EDGES, L): tree(
+        "helpdesk", "jdoe", "webgpo", edges=[("helpdesk", "GenericWrite", "webgpo"), ("jdoe", "Owns", "webgpo")]),
+    Q.children_of({WEB}, GPO_TARGET_KINDS, L): tree("w", "web01", edges=[("w", "Contains", "web01")]),
 }
 
 
@@ -305,3 +318,67 @@ def test_rest_fallback_when_cypher_is_disabled() -> None:
         tree_view, contents = report.views
         assert tree_view.backend == "rest" and not tree_view.rows and "needs Cypher" in tree_view.notes[-1]
         assert [(r.name, r.tier_zero) for r in contents.rows] == [("SQL01.CORP.LOCAL", True)]
+
+
+def test_gpo_reach_stops_at_blocked_inheritance_unless_enforced() -> None:
+    g = Graph.from_cypher(RESULTS[Q.sub_containers(DOM, L)]["data"])
+    domain = g.find(DOM)
+    assert domain
+    reached, blocked = reach(domain, g, enforced=False)
+    assert reached == {DOM, STAFF, USERS, SYSTEM} and [n.objectid for n in blocked] == [SERVERS]
+    reached, blocked = reach(domain, g, enforced=True)
+    assert len(reached) == 7 and not blocked
+
+
+def test_gpo_summary_counts_only_what_the_links_reach(svc: EntityService) -> None:
+    gpo = svc.resolve("WALLPAPER", kinds=("GPO",))
+    fields = {f.label: f.value for f in svc.report(gpo, [], show_summary=True).extra}
+    assert fields["Linked to"] == ["CORP.LOCAL"]
+    assert fields["Stopped by blocked inheritance at"] == ["SERVERS"]
+    # WEB01 and SQL01 sit below SERVERS, which blocks inheritance.
+    assert fields["Computers affected (enabled)"] == "0 (0)"
+    assert fields["Users affected (enabled)"] == "2 (1)"
+    assert fields["Owned users / computers affected"] == 1
+    assert fields["Editable by (outside Tier Zero)"] == "nobody"
+
+
+def test_gpo_links_and_affected_views(svc: EntityService) -> None:
+    gpo = svc.resolve("WALLPAPER", kinds=("GPO",))
+    links, affected = (svc.view(gpo, key)[0] for key in ("links", "affected"))
+    link = links.rows[0]
+    assert (link.linked_to, link.enforced, link.users, link.computers, link.blocked_at) == (
+        "CORP.LOCAL", None, 2, 0, ["SERVERS"])
+    assert [(r.name, r.location, r.depth) for r in affected.rows] == [
+        ("HELPDESK@CORP.LOCAL", "CORP.LOCAL/USERS", 2),  # owned first
+        ("JDOE@CORP.LOCAL", "CORP.LOCAL/STAFF", 2),
+    ]
+
+
+def test_gpo_from_the_shell(shell: BHShell, directory: list[str]) -> None:
+    run(shell, "login -u admin")
+    out = run(shell, "gpo 'WEB HARDENING@corp.local'")
+    for expected in ("WEB@CORP.LOCAL", "Computers affected (enabled)", "1 (1)", "HELPDESK@CORP.LOCAL (owned)"):
+        assert expected in out
+    out = run(shell, "gpo 'WEB HARDENING@corp.local' -c")
+    assert "WEB01.CORP.LOCAL" in out and "Linked to" not in out
+
+
+def test_gpo_rest_fallback_uses_bloodhound_lists() -> None:
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.POST, CYPHER, status=404, body="404 page not found")
+        rsps.add(responses.GET, f"{BASE}api/v2/search", json={"data": [
+            {"objectid": WEBGPO, "type": "GPO", "name": "WEB HARDENING@CORP.LOCAL"}]})
+        rsps.add(responses.GET, f"{BASE}api/v2/gpos/{WEBGPO}", json={"data": {
+            "computers": 1, "users": 0, "ous": 1, "controllers": 2, "props": NODES["webgpo"]["properties"]}})
+        rsps.add(responses.GET, f"{BASE}api/v2/gpos/{WEBGPO}/computers", json={"count": 1, "data": [
+            {"objectID": WEB01, "name": "WEB01.CORP.LOCAL", "label": "Computer", "kinds": ["Computer", "Base"]}]})
+        rsps.add(responses.GET, f"{BASE}api/v2/gpos/{WEBGPO}/users", json={"count": 0, "data": []})
+        client = BHClient(BASE)
+        client.set_jwt("t")
+        svc = EntityService(client)
+        gpo = svc.resolve("WEB HARDENING@corp.local", kinds=("GPO",))
+        report = svc.report(gpo, ["links", "affected"], show_summary=True)
+        assert {f.label: f.value for f in report.extra}["Computers affected"] == 1
+        links, affected = report.views
+        assert not links.rows and "needs Cypher" in links.notes[-1]
+        assert [r.name for r in affected.rows] == ["WEB01.CORP.LOCAL"]

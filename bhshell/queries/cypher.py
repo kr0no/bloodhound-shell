@@ -176,6 +176,11 @@ def gp_links_to(objectid: str) -> str:
     return f"MATCH p=(g:GPO)-[r:{GP_LINK}]->(n:Base) WHERE n.objectid = {lit(objectid)} RETURN p"
 
 
+def gp_links_from(objectid: str) -> str:
+    """Where a GPO is linked (domains and OUs)."""
+    return f"MATCH p=(g:GPO)-[r:{GP_LINK}]->(n:Base) WHERE g.objectid = {lit(objectid)} RETURN p"
+
+
 def gp_links_above(objectid: str) -> str:
     """GPOs linked to any container above the object, with the containment chain down to it."""
     return (
@@ -197,6 +202,16 @@ def contained_objects(objectid: str, limit: int) -> str:
     return (
         f"MATCH p=(o:Base)-[:{CONTAINS}*1..]->(n:Base) "
         f"WHERE o.objectid = {lit(objectid)} AND NOT {_IS_CONTAINER} RETURN p LIMIT {limit}"
+    )
+
+
+def children_of(objectids: Iterable[str], kinds: Iterable[str], limit: int) -> str:
+    """Objects of `kinds` placed directly in any of the containers."""
+    ids = ", ".join(lit(o) for o in sorted(objectids))
+    which = " OR ".join(f"n:{k}" for k in kinds)
+    return (
+        f"MATCH p=(c:Base)-[:{CONTAINS}]->(n:Base) "
+        f"WHERE c.objectid IN [{ids}] AND ({which}) RETURN p LIMIT {limit}"
     )
 
 

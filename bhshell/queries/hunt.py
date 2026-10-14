@@ -531,7 +531,7 @@ CHECKS: tuple[Check, ...] = (
            Column("Target adminCount", "admincount", "bool")), _takeover_rows, scoped=True),
     Check("gpo-control", "GPO and OU link control", "high",
           "Principals outside Tier Zero that can edit a GPO or link GPOs to an OU (code execution on every "
-          "computer below it).",
+          "computer below it). 'gpo NAME' shows what a GPO applies to.",
           _edge_check(GPO_CONTROL_EDGES, _NOT_T0, "(t:GPO OR t:OU)"),
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, TARGET_KIND, T0), _edge_rows(GPO_CONTROL_EDGES),
           fallback=_edge_check(None, _NOT_T0, "(t:GPO OR t:OU)"), scoped=True),

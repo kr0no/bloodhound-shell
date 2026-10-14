@@ -318,7 +318,7 @@ class ADObject:
 
     @staticmethod
     def wrap(node: Node) -> ADObject:
-        kinds = {"User": User, "Computer": Computer, "Group": Group,
+        kinds = {"User": User, "Computer": Computer, "Group": Group, "GPO": GPO,
                  "OU": DirectoryContainer, "Container": DirectoryContainer, "Domain": DirectoryContainer}
         return kinds.get(node.kind, ADObject)(node)
 
@@ -405,6 +405,17 @@ class Group(ADObject):
             SummaryField("AdminCount", admincount, "bool", _risk_if(admincount, "medium")),
             *self._common_tail(),
         ]
+
+
+class GPO(ADObject):
+    def summary(self) -> list[SummaryField]:
+        p = self.props
+        fields = self._common_head()
+        if p.get("gpcpath"):
+            fields.append(SummaryField("SYSVOL Path", p["gpcpath"]))
+        if p.get("whencreated"):
+            fields.append(SummaryField("Created", p["whencreated"], "date"))
+        return [*fields, *self._common_tail()]
 
 
 class DirectoryContainer(ADObject):
