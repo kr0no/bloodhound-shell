@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from bhshell.client.client import BHClient
 from bhshell.errors import (
@@ -21,6 +21,7 @@ from bhshell.errors import (
 from bhshell.models.entities import Graph, Node
 from bhshell.models.results import Column, EntityReport, RelationshipRow, ViewResult
 from bhshell.queries import cypher as Q
+from bhshell.queries.containers import CONTAINER_KINDS, GPO_TARGET_KINDS, ContainerService
 from bhshell.queries.edges import (
     CONTROL_EDGES,
     EXEC_EDGES,
@@ -40,16 +41,23 @@ ENTITY_KINDS = ("User", "Computer", "Group")
 PATH_KINDS = (*ENTITY_KINDS, "Domain", "OU", "GPO", "Container")
 _SID_RE = re.compile(r"(^|-)S-1-\d+(-\d+)+$", re.IGNORECASE)
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+_DN_RE = re.compile(r"^(CN|OU|DC)=.+", re.IGNORECASE)
+DN_HINT = "Use the distinguished name ('OU=Servers,OU=Tier1,DC=corp,DC=local') or the object ID (GUID)."
 
 # View keys in display order, and which entity kinds support them.
 VIEWS: dict[str, tuple[str, ...]] = {
     "groups": ENTITY_KINDS,
     "members": ("Group",),
+    "tree": CONTAINER_KINDS,
+    "contents": CONTAINER_KINDS,
     "outbound": ENTITY_KINDS,
-    "inbound": ENTITY_KINDS,
+    "inbound": (*ENTITY_KINDS, *CONTAINER_KINDS),
     "sessions": ENTITY_KINDS,
     "privs": ENTITY_KINDS,
+    "gpos": (*GPO_TARGET_KINDS, *CONTAINER_KINDS),
 }
+# Views served by `ContainerService`.
+CONTAINER_VIEWS = frozenset({"tree", "contents", "gpos"})
 
 FLAGS = [Column("T0", "tier_zero", "t0"), Column("Owned", "owned", "owned")]
 DEPTH, VIA = Column("Depth", "depth", "depth"), Column("Via", "via", "via")
@@ -84,6 +92,9 @@ REST_ROUTES: dict[tuple[str, str], list[RestRoute]] = {
     ("User", "inbound"): [("controllers", "Controls", "in")],
     ("Computer", "inbound"): [("controllers", "Controls", "in"), ("constrained-users", "AllowedToDelegate", "in")],
     ("Group", "inbound"): [("controllers", "Controls", "in")],
+    ("OU", "inbound"): [("controllers", "Controls", "in")],
+    ("Container", "inbound"): [("controllers", "Controls", "in")],
+    ("Domain", "inbound"): [("controllers", "Controls", "in")],
     ("User", "sessions"): [("sessions", HAS_SESSION, "out")],
     ("Computer", "sessions"): [("sessions", HAS_SESSION, "in")],
     ("Group", "sessions"): [("sessions", HAS_SESSION, "out")],
@@ -104,15 +115,19 @@ class Identifier:
     domain: str = ""
     fqdn: str = ""
     objectid: str = ""
+    # Distinguished name, upper-cased.
+    dn: str = ""
 
 
 def parse_identifier(raw: str, *, domain: str | None = None, kind: str | None = None) -> Identifier:
-    """Parse `jdoe`, `jdoe@corp.local`, `CORP\\jdoe`, `WS01.corp.local` or a SID/GUID."""
+    """Parse `jdoe`, `jdoe@corp.local`, `CORP\\jdoe`, `WS01.corp.local`, a SID/GUID or a distinguished name."""
     text = raw.strip()
     if not text:
         raise ValueError("Empty object name")
     if _SID_RE.search(text) or _GUID_RE.match(text):
         return Identifier(raw=text, objectid=text.upper())
+    if _DN_RE.match(text):
+        return Identifier(raw=text, dn=re.sub(r"(?<!\\),\s+", ",", text).upper())
     sam, dom, fqdn = text, "", ""
     if "\\" in text:
         dom, sam = text.split("\\", 1)
@@ -144,6 +159,8 @@ def _matches(node: Node, ident: Identifier, kinds: tuple[str, ...]) -> bool:
         return False
     if ident.objectid:
         return node.objectid.upper() == ident.objectid
+    if ident.dn:
+        return str(node.properties.get("distinguishedname") or "").upper() == ident.dn
     sam = ident.sam.upper()
     name = node.name.upper()
     node_sam = node.samaccountname.upper()
@@ -178,9 +195,12 @@ class EntityService:
         # `None` = not probed yet, `True`/`False` once known.
         self.cypher_available: bool | None = None
         self._cache: dict[str, Graph] = {}
+        self._scalars: dict[str, list[dict[str, Any]] | None] = {}
+        self.containers = ContainerService(self)
 
     def reset_cache(self) -> None:
         self._cache.clear()
+        self._scalars.clear()
 
     def reset(self) -> None:
         """Forget everything learned about the backend (after URL/auth change)."""
@@ -213,6 +233,31 @@ class EntityService:
             return int(literals[0]["value"])
         except (ApiError, CypherDisabledError, IndexError, KeyError, TypeError, ValueError):
             return None
+
+    def scalar_rows(self, query: str) -> list[dict[str, Any]] | None:
+        """Rows of a query returning scalars (`RETURN a AS x, count(b) AS y`), cached like `run_cypher`.
+
+        `None` if the server cannot run it (Cypher off, or aggregates unsupported).
+        """
+        if query not in self._scalars:
+            rows: list[dict[str, Any]] | None = None
+            if self.cypher_available is not False:
+                try:
+                    literals = self.client.cypher(query).get("literals") or []
+                except (ApiError, CypherDisabledError):
+                    pass
+                else:
+                    # Literals come back as one flat `{key, value}` list: a repeated key starts a new row.
+                    rows, row = [], {}
+                    for item in literals:
+                        if item.get("key") in row:
+                            rows.append(row)
+                            row = {}
+                        row[item.get("key")] = item.get("value")
+                    if row:
+                        rows.append(row)
+            self._scalars[query] = rows
+        return self._scalars[query]
 
     def truncation(self, graph: Graph) -> tuple[bool, int | None]:
         """Was `graph`'s LIMITed query cut off? Returns `(truncated, server_total)`.
@@ -266,7 +311,9 @@ class EntityService:
             scope = f" in domain {ident.domain}" if ident.domain else ""
             raise NotFoundError(f"No {what} named '{name}'{scope}")
         if len(unique) > 1:
-            raise AmbiguousMatchError(name, sorted(unique.values(), key=lambda n: (n.domain, n.name)))
+            found = sorted(unique.values(), key=lambda n: (n.domain, n.name))
+            hint = DN_HINT if any(n.kind in ("OU", "Container") for n in found) else ""
+            raise AmbiguousMatchError(name, found, hint=hint)
         node = next(iter(unique.values()))
         if self.cypher_available is False:
             node = self._hydrate_rest(node)
@@ -275,12 +322,15 @@ class EntityService:
     def _resolve_cypher(self, ident: Identifier, kind: str | None) -> list[Node]:
         if ident.objectid:
             query = Q.by_objectid(ident.objectid)
+        elif ident.dn:
+            query = Q.by_name([Q.dn_condition(ident.dn)], kind, limit=100)
         else:
             query = Q.by_name(Q.name_conditions(ident.sam, ident.fqdn or None, kind), kind, limit=100)
         return list(self.run_cypher(query).nodes.values())
 
     def _resolve_rest(self, ident: Identifier, kinds: tuple[str, ...]) -> list[Node]:
-        term = ident.objectid or ident.sam.rstrip("$")
+        # A DN is searched by its first RDN value (`OU=SERVERS,...` -> `SERVERS`), then matched in full.
+        term = ident.objectid or re.split(r"(?<!\\),", ident.dn)[0].split("=", 1)[-1] or ident.sam.rstrip("$")
         found: list[Node] = []
         for k in kinds:
             for item in self.client.search(term, k):
@@ -302,13 +352,16 @@ class EntityService:
 
     def report(self, node: Node, views: list[str], *, show_summary: bool) -> EntityReport:
         report = EntityReport(node=node, show_summary=show_summary)
+        if show_summary and node.kind in CONTAINER_KINDS:
+            report.extra = self.containers.summary(node)
         for key in views:
             if node.kind in VIEWS.get(key, ()):
                 report.views.extend(self.view(node, key))
         return report
 
     def view(self, node: Node, key: str) -> list[ViewResult]:
-        return getattr(self, key)(node)  # every VIEWS key is a method
+        owner = self.containers if key in CONTAINER_VIEWS else self
+        return getattr(owner, key)(node)  # every VIEWS key is a method
 
     def groups(self, node: Node) -> list[ViewResult]:
         title = "Group memberships (direct + nested)"

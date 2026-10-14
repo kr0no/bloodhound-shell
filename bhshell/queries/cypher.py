@@ -10,7 +10,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from bhshell.queries.edges import EXEC_EDGES, HAS_SESSION, MEMBER_OF
+from bhshell.models.entities import TIER_ZERO_LABEL
+from bhshell.queries.edges import CONTAINS, EXEC_EDGES, GP_LINK, HAS_SESSION, MEMBER_OF
 
 
 def lit(value: str) -> str:
@@ -60,6 +61,11 @@ def _label(kind: str | None) -> str:
 
 def by_objectid(objectid: str) -> str:
     return f"MATCH (n:Base) WHERE n.objectid = {lit(objectid)} RETURN n"
+
+
+def dn_condition(dn: str) -> str:
+    """Match a distinguished name; BloodHound stores them upper-cased."""
+    return f"n.distinguishedname = {lit(dn.upper())}"
 
 
 def by_name(conditions: list[str], kind: str | None, limit: int) -> str:
@@ -153,3 +159,74 @@ def sessions_of_group_members(objectid: str, limit: int) -> str:
         f"WHERE g.objectid = {lit(objectid)} RETURN p LIMIT {limit}"
     )
 
+
+
+# Directory tree. `Contains` runs domain -> OU / container -> ... -> object, one parent per object.
+
+_IS_CONTAINER = "(n:OU OR n:Container)"
+
+
+def containers_above(objectid: str) -> str:
+    """The chain of containers (domain first) holding the object."""
+    return f"MATCH p=(c:Base)-[:{CONTAINS}*1..]->(n:Base) WHERE n.objectid = {lit(objectid)} RETURN p"
+
+
+def gp_links_to(objectid: str) -> str:
+    """GPOs linked to the object itself (a domain or an OU)."""
+    return f"MATCH p=(g:GPO)-[r:{GP_LINK}]->(n:Base) WHERE n.objectid = {lit(objectid)} RETURN p"
+
+
+def gp_links_above(objectid: str) -> str:
+    """GPOs linked to any container above the object, with the containment chain down to it."""
+    return (
+        f"MATCH p=(g:GPO)-[r:{GP_LINK}]->(c:Base)-[:{CONTAINS}*1..]->(n:Base) "
+        f"WHERE n.objectid = {lit(objectid)} RETURN p"
+    )
+
+
+def sub_containers(objectid: str, limit: int) -> str:
+    """Every OU and container below the object."""
+    return (
+        f"MATCH p=(o:Base)-[:{CONTAINS}*1..]->(n:Base) "
+        f"WHERE o.objectid = {lit(objectid)} AND {_IS_CONTAINER} RETURN p LIMIT {limit}"
+    )
+
+
+def contained_objects(objectid: str, limit: int) -> str:
+    """Every object (other than OUs and containers) below the object, with the chain down to it."""
+    return (
+        f"MATCH p=(o:Base)-[:{CONTAINS}*1..]->(n:Base) "
+        f"WHERE o.objectid = {lit(objectid)} AND NOT {_IS_CONTAINER} RETURN p LIMIT {limit}"
+    )
+
+
+def contained_counts(objectid: str, *, nested: bool) -> str:
+    """Scalar rows `parent, kinds, enabled, total`: the direct children of each container, by kind.
+
+    `nested=False` covers the object's own children, `nested=True` those of every container below it.
+    """
+    if nested:
+        match, anchor = f"(o:Base)-[:{CONTAINS}*1..]->(c:Base)-[:{CONTAINS}]->(n:Base)", "o"
+    else:
+        match, anchor = f"(c:Base)-[:{CONTAINS}]->(n:Base)", "c"
+    return (
+        f"MATCH {match} WHERE {anchor}.objectid = {lit(objectid)} "
+        f"RETURN c.objectid AS parent, labels(n) AS kinds, n.enabled AS enabled, count(n) AS total"
+    )
+
+
+def gp_link_counts(objectid: str) -> str:
+    """Scalar rows `parent, total`: the number of GPO links on each container below the object."""
+    return (
+        f"MATCH (o:Base)-[:{CONTAINS}*1..]->(c:Base)<-[r:{GP_LINK}]-(g:GPO) "
+        f"WHERE o.objectid = {lit(objectid)} RETURN c.objectid AS parent, count(g) AS total"
+    )
+
+
+def controllers_outside_t0(objectids: Iterable[str], edges: Iterable[str] | None, limit: int) -> str:
+    """Principals outside Tier Zero holding `edges` (any edge when `None`) over any of the objects."""
+    ids = ", ".join(lit(o) for o in sorted(objectids))
+    return (
+        f"MATCH p=(s:Base)-{_rel(edges)}->(t:Base) "
+        f"WHERE t.objectid IN [{ids}] AND NOT s:{TIER_ZERO_LABEL} RETURN p LIMIT {limit}"
+    )

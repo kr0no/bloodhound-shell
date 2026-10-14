@@ -314,6 +314,12 @@ class BHClient:
         data = resp.get("data") or {}
         return data.get("props") or data
 
+    def entity_counts(self, kind: str, objectid: str) -> dict[str, int]:
+        """Related-object counts the entity endpoint reports (`users`, `computers`, `gpos`, ...)."""
+        resp = self.get(f"api/v2/{_collection(kind)}/{objectid}", counts="true") or {}
+        data = resp.get("data") or {}
+        return {k: v for k, v in data.items() if isinstance(v, int) and not isinstance(v, bool)}
+
     def entity_related(
         self, kind: str, objectid: str, relation: str, *, limit: int | None = None
     ) -> list[dict[str, Any]]:

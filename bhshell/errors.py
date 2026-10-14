@@ -67,7 +67,7 @@ class UnsupportedFeature(BHError):
 class AmbiguousMatchError(BHError):
     hint = "Qualify the name: 'jdoe@corp.local', 'CORP\\jdoe', '--domain CORP.LOCAL' or use the SID."
 
-    def __init__(self, query: str, candidates: Sequence[Node]) -> None:
-        super().__init__(f"'{query}' matches {len(candidates)} objects")
+    def __init__(self, query: str, candidates: Sequence[Node], *, hint: str = "") -> None:
+        super().__init__(f"'{query}' matches {len(candidates)} objects", hint=hint)
         self.query = query
         self.candidates = list(candidates)

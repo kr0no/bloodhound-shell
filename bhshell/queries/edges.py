@@ -6,6 +6,9 @@ from typing import Literal
 
 MEMBER_OF = "MemberOf"
 HAS_SESSION = "HasSession"
+# Directory tree (domain -> OU / container -> ... -> object) and GPO links (GPO -> domain / OU).
+CONTAINS = "Contains"
+GP_LINK = "GPLink"
 
 # Direct object control (ACL abuse).
 ACL_EDGES: frozenset[str] = frozenset({
@@ -45,6 +48,11 @@ COERCION_EDGES: frozenset[str] = frozenset({
     "CoerceAndRelayNTLMToADCS",
 })
 
+# Rights that let the holder edit a GPO (and so run code on everything it applies to).
+GPO_EDIT_EDGES: frozenset[str] = frozenset({
+    "GenericAll", "GenericWrite", "WriteDacl", "WriteOwner", "Owns", "OwnsLimitedRights", "WriteOwnerLimitedRights",
+})
+
 # Code execution / logon rights on computers.
 EXEC_EDGES: frozenset[str] = frozenset({"AdminTo", "CanRDP", "ExecuteDCOM", "CanPSRemote", "SQLAdmin"})
 
@@ -61,11 +69,11 @@ TRAVERSABLE_EDGES: frozenset[str] = (
     (CONTROL_EDGES - {"GetChanges", "GetChangesAll", "GetChangesInFilteredSet", "Enroll", "ManageCA",
                       "ManageCertificates", "WritePKIEnrollmentFlag", "WritePKINameFlag"})
     | EXEC_EDGES | TRUST_EDGES | TRUST_ABUSE_EDGES
-    | {MEMBER_OF, HAS_SESSION, "Contains", "GPLink", "DCFor", "WriteSPN"}
+    | {MEMBER_OF, HAS_SESSION, CONTAINS, GP_LINK, "DCFor", "WriteSPN"}
 )
 
 # Hops that need no action: rights flow along them by themselves.
-PASSIVE_EDGES: frozenset[str] = frozenset({MEMBER_OF, "Contains", "GPLink", "DCFor"})
+PASSIVE_EDGES: frozenset[str] = frozenset({MEMBER_OF, CONTAINS, GP_LINK, "DCFor"})
 
 # Names accepted by `path --exclude` for groups of edges.
 EDGE_GROUPS: dict[str, frozenset[str]] = {

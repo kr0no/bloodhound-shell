@@ -23,6 +23,7 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 | | `whoami` / `status` | Principal, roles, token expiry, server version, Cypher availability |
 | | `config [KEY [VALUE]]` | Show or change persisted settings |
 | Entities | `user NAME`, `computer NAME`, `group NAME`, `lookup NAME` | Triage summary + views |
+| | `ou NAME [-t] [-c] [-G] [-I]` | OUs, containers and domains: tree, objects below, applied GPOs, inbound control; see [Exploring OUs](#exploring-ous) |
 | | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
 | Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables |
 | Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
@@ -33,14 +34,16 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 
 ### Naming objects
 
-`NAME` accepts `jdoe`, `jdoe@corp.local`, `CORP\jdoe`, `WS01`, `WS01$`, `WS01.corp.local`, or a SID.
-`-d/--domain` restricts the domain. When a name exists in more than one domain the command stops and
-lists the candidates (domain + SID); re-run it with a qualified name.
+`NAME` accepts `jdoe`, `jdoe@corp.local`, `CORP\jdoe`, `WS01`, `WS01$`, `WS01.corp.local`, a SID,
+or a distinguished name (`CN=jdoe,OU=Staff,DC=corp,DC=local`). `-d/--domain` restricts the domain.
+When a name exists in more than one domain the command stops and lists the candidates (domain + SID);
+re-run it with a qualified name. Same-named OUs in one domain are listed with their distinguished
+names; pass the DN (or the object ID) to pick one.
 
 ### Views
 
-With no view flags the **summary** is shown (Kerberoastable, AS-REP roastable, delegation, password
-age, last logon, Tier Zero/owned, ...; risky values are highlighted).
+With no view flags the **summary** is shown (distinguished name, Kerberoastable, AS-REP roastable,
+delegation, password age, last logon, Tier Zero/owned, ...; risky values are highlighted).
 
 | Flag | View |
 |---|---|
@@ -50,7 +53,8 @@ age, last logon, Tier Zero/owned, ...; risky values are highlighted).
 | `-I, --inbound` | Principals holding dangerous rights over the object |
 | `-s, --sessions` | `HasSession` (user → computers, computer → users, group → members' sessions) |
 | `-p, --local-admin, --privs` | `AdminTo`, `CanRDP`, `ExecuteDCOM`, `CanPSRemote`, `SQLAdmin`; computers also list who has these rights on them, with group members unrolled |
-| `-a, --all` | Summary plus every applicable view |
+| `-G, --gpos` | GPOs that apply to the user or computer, and who outside Tier Zero can edit them (see [Exploring OUs](#exploring-ous)) |
+| `-a, --all` | Summary plus every applicable view (for users and computers this includes `--gpos`) |
 | `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). A per-right count line is always shown |
 | `--json` / `-o FILE.json\|.csv` | Raw JSON output / export (never capped by `--max-rows`) |
 
@@ -83,6 +87,104 @@ that contain spaces. `-t` takes any BloodHound type (`User`, `Computer`, `Group`
 `GPO`, `CertTemplate`, ...; default: any), `-c ATTR,...` adds columns, `-l N` caps the results
 fetched (default `max_results`, with a note when there are more) and `-n` the rows shown.
 `--json` prints every property of each match. For OR conditions or relationships, use `cypher`.
+
+### Exploring OUs
+
+`ou NAME` looks at an OU, a container (`CN=Users`) or a whole domain: where it sits, what is below
+it, the GPOs that apply to it and who controls it. `NAME` is `SERVERS`, `SERVERS@corp.local`, a
+distinguished name (`OU=Web,OU=Servers,DC=corp,DC=local`), an object ID (GUID), or a domain
+(`corp.local`). `search -t OU` lists the OUs, and `ou corp.local -t` shows them as a tree.
+
+Several OUs often share a name (`Staff` under two parents). The command then stops and lists the
+candidates with their distinguished names; re-run it with the DN.
+
+```
+ou corp.local -t                                   # the whole OU tree of a domain
+ou SERVERS@corp.local                              # summary: location, objects below, linked GPOs
+ou 'OU=Web,OU=Servers,DC=corp,DC=local' -G         # GPOs applied to everything in it
+ou SERVERS@corp.local -c -o servers.csv            # every object below it, with its location
+ou SERVERS@corp.local -I                           # who can link GPOs to it or take it over
+ou CN=Users,DC=corp,DC=local                       # containers work too
+computer WEB01 -G                                  # the GPOs that apply to one computer
+user CORP\jdoe -G                                  # ... or to one user
+```
+
+| Flag | View |
+|---|---|
+| (none) | Summary: distinguished name, whether the OU blocks GPO inheritance, creation date, location (`CORP.LOCAL > SERVERS`), users / computers / groups below it at any depth (enabled ones in brackets), OUs and containers below it, Tier Zero and owned objects below it, and the GPOs linked to it (`(enforced)` marked) |
+| `-t, --tree` | The OUs and containers below it, drawn as a tree with the object itself first |
+| `-c, --contents` | Every object below it at any depth (OUs and containers excluded) |
+| `-G, --gpos` | The GPOs applied to the objects in it, in precedence order, and who outside Tier Zero can edit them |
+| `-I, --inbound` | Principals with dangerous rights over it (as for users) |
+| `-a, --all` | Summary plus every view |
+| `-d`, `-n`, `--json`, `-o FILE` | As for the other entity commands |
+
+#### Tree
+
+Each row counts everything below that entry, not only its direct children:
+
+| Column | Meaning |
+|---|---|
+| Users (enabled), Computers (enabled), Groups | Objects anywhere below it; `135 (42)` is 135 computers, 42 of them enabled |
+| T0 below, Owned below | Tier Zero and owned objects anywhere below it |
+| GPO links | GPOs linked directly to it |
+| Blocks inheritance | The OU blocks GPO inheritance (OUs only) |
+| T0, Owned | The entry itself is Tier Zero / owned |
+
+Containers with no objects anywhere below them (mostly system containers such as `CN=System`
+children) are left out, and a note says how many. OUs are always shown, even when empty. If the
+server cannot run the aggregate queries the counts come from, the tree is still drawn, without
+counts and without hiding anything.
+
+#### Contents
+
+Objects are listed Tier Zero first, then owned, then users, computers and groups, with disabled
+accounts after enabled ones. **Location** is the path of sub-OUs from the explored one down to the
+object (`WEB/DMZ`), or `direct` for its direct children; **Depth** counts the levels. The list
+stops at `max_results` objects, with a note giving the server's real total; raise it with
+`config max_results N`, or use `-o FILE` to export what was fetched.
+
+#### Applied GPOs
+
+`-G` follows the OU chain from the domain down to the object (or to the explored OU, for `ou`)
+and evaluates each GPO link on it the way Windows does:
+
+* An OU that **blocks inheritance** stops the GPOs linked above it, unless the link is
+  **enforced**. Such links are listed as `no (inheritance blocked at SERVERS)`.
+* Rows are in **precedence** order, the first one winning when two GPOs set the same thing:
+  enforced links first (the one highest in the tree wins), then the other links from the closest
+  OU up to the domain, then the links that do not apply.
+* A GPO linked at several levels is applied once. Its later links are marked
+  `yes (duplicate: already applied through CORP.LOCAL)`.
+* **Editable by (outside Tier Zero)** lists the principals outside Tier Zero with `GenericAll`,
+  `GenericWrite`, `WriteDacl`, `WriteOwner` or `Owns` (and their limited-rights variants) over the
+  GPO, owned ones first and marked `(owned)`. Editing a GPO runs code on every computer or user it
+  applies to, so an owned principal here is a direct route to the objects below. The table shows
+  three names per GPO; `--json` and `-o` have them all.
+* **T0** and **Owned** mark GPOs that are Tier Zero or owned.
+
+BloodHound does not collect GPO security filtering, WMI filters, loopback processing or the link
+order within one OU, so a GPO listed as applying may still be filtered out on the host.
+
+#### Where `ou` fits
+
+* `hunt gpo-control` finds principals outside Tier Zero that can edit a GPO or link one to an OU.
+  `ou NAME -G`, or `computer NAME -G` on a target, shows which of those GPOs reach it.
+* `ou NAME -I` shows who holds `WriteGPLink` on an OU (they can link a GPO they control to it) or
+  `GenericAll` / `WriteDacl` (control that extends to the objects inheriting the OU's ACEs).
+* `path` already walks `GPLink` and `Contains` edges, so `path SRC TARGET` finds GPO-based routes;
+  `ou` explains them.
+* `ou ... -c -o FILE.csv` exports the scope of an OU (every object below it with its DN) for a
+  report or a target list.
+
+#### Data needed
+
+The tree and the GPO links come from SharpHound's **Container** collection (`Contains` and
+`GPLink` edges, `blocksinheritance` on OUs, `enforced` on links). A domain collected without it
+has no OU data, and the views say so instead of showing empty results. Without Cypher, the REST
+fallback gives the counts, the objects below an OU or a domain, and the GPOs linked to an OU or
+above it (without enforcement or blocked inheritance); the tree and the GPOs applied to one object
+need Cypher.
 
 ## Analysis
 
@@ -268,7 +370,7 @@ exist is reported in a note under `query list`.
 ```
 bhshell/cli.py          command-line options
 bhshell/client/         HTTP transport: JWT and HMAC auth, retries, error mapping, pagination
-bhshell/models/         Node/Edge/Graph, User/Computer/Group summaries, view results
+bhshell/models/         Node/Edge/Graph, User/Computer/Group/OU summaries, view results
 bhshell/queries/        Cypher templates, edge taxonomy, and the logic behind each command
 bhshell/render/         rich tables and panels, path graphs, SVG/PNG, JSON/CSV export
 bhshell/shell/          the cmd2 app and one command set per area
@@ -276,6 +378,8 @@ bhshell/shell/          the cmd2 app and one command set per area
 
 Everything goes through `POST /api/v2/graphs/cypher`. If Cypher is disabled, the views fall back
 to the per-entity REST endpoints, which can't tell ACL rights apart (they all show as `Controls`).
+The OU tree and the applied GPOs have no REST equivalent; without Cypher, `ou` shows the counts,
+the objects below an OU and the GPOs linked to it or above it.
 
 Rights are queried per severity, each with its own `LIMIT max_results`, so a flood of low-impact
 edges can't push `GetChangesAll` out of the result. When a query hits the limit, the shell asks
@@ -310,7 +414,8 @@ could otherwise be piped to a system shell. Use `-o FILE` instead.
 
 bhshell targets BloodHound CE v9 and is tested against v9.7.1. It relies on the `Tag_Tier_Zero`
 and `Tag_Owned` kinds and on the privilege-zone (`asset-group-tags`) API, so releases before
-privilege zones are not supported.
+privilege zones are not supported. The object counts of `ou` use aggregate Cypher
+(`RETURN labels(n), count(n)`); a server that rejects it still gets the views, without counts.
 
 `owned add` / `hvt add` create a selector named `bhshell: <object>` in the Owned label or the
 Tier Zero tier. `remove` only deletes selectors seeded with that object alone, so nothing else

@@ -22,10 +22,13 @@ def to_json(data: Any) -> str:
 def report_rows(report: EntityReport) -> tuple[list[str], list[dict[str, Any]]]:
     """Flatten a report into CSV rows (summary as key/value, views as relationships)."""
     if not report.views:
-        rows = [{"field": f.label, "value": _flat(f.value)} for f in report.entity.summary()]
+        rows = [{"field": f.label, "value": _flat(f.value)} for f in report.summary()]
         return ["field", "value"], rows
     rows = [{"view": v.key, **r.as_dict()} for v in report.views for r in v.rows]
-    return ["view", *ROW_FIELDS], rows
+    if not rows:
+        return ["view", *ROW_FIELDS], rows
+    # Views have different row types: the columns are every field seen, in order.
+    return list(dict.fromkeys(key for row in rows for key in row)), rows
 
 
 def node_rows(nodes: Iterable[Node]) -> tuple[list[str], list[dict[str, Any]]]:

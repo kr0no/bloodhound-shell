@@ -113,11 +113,10 @@ class Renderer:
         self.status = status or Console(stderr=True, highlight=False)
 
     def summary(self, report: EntityReport) -> None:
-        entity = report.entity
         table = Table(box=None, show_header=False, pad_edge=False, padding=(0, 2))
         table.add_column(style="bold")
         table.add_column(overflow="fold")
-        for f in entity.summary():
+        for f in report.summary():
             if f.type == "list" and not f.value:
                 continue
             table.add_row(f.label, fmt_field(f))
@@ -162,7 +161,7 @@ class Renderer:
 
     def view(self, view: ViewResult, max_rows: int = 0) -> None:
         breakdown = self._breakdown(view)
-        self.table(_titled(view.title, view.backend), view.columns, [r.as_dict() for r in view.rows],
+        self.table(_titled(view.title, view.backend), view.columns, [r.as_display() for r in view.rows],
                    max_rows=max_rows, notes=view.notes, lead=[] if breakdown is None else [breakdown])
 
     @staticmethod
@@ -280,16 +279,20 @@ class Renderer:
         self.console.print(self._nodes_table(nodes, title))
 
     @staticmethod
-    def _nodes_table(nodes: Iterable[Node], title: str) -> Table:
+    def _nodes_table(nodes: Iterable[Node], title: str, *, dn: bool = False) -> Table:
+        """`dn` adds the distinguished name, which tells same-named OUs apart."""
         nodes = list(nodes)
         table = Table(title=Text(f"{title} [{len(nodes)}]"), title_justify="left", box=box.SIMPLE_HEAD,
                       header_style="bold")
-        for header in ("Type", "Name", "Domain", "Object ID", "Enabled", "T0", "Owned"):
+        headers = ("Type", "Name", "Domain", *(("Distinguished name",) if dn else ()), "Object ID", "Enabled",
+                   "T0", "Owned")
+        for header in headers:
             table.add_column(header, overflow="fold")
         for n in nodes:
             enabled = n.properties.get("enabled")
+            dn_cell = (Text(str(n.properties.get("distinguishedname") or "-")),) if dn else ()
             table.add_row(
-                fmt_kind(n.kind), Text(n.name), Text(n.domain), Text(n.objectid, style="dim"),
+                fmt_kind(n.kind), Text(n.name), Text(n.domain), *dn_cell, Text(n.objectid, style="dim"),
                 fmt_bool(None if enabled is None else bool(enabled)),
                 _marker(n.tier_zero, "T0", "bold red"), _marker(n.owned, "owned", "bold cyan"),
             )
@@ -323,7 +326,8 @@ class Renderer:
     def error(self, err: BHError) -> None:
         self.status.print(Text.assemble(("error: ", "bold red"), err.message))
         if isinstance(err, AmbiguousMatchError):
-            self.status.print(self._nodes_table(err.candidates, "Candidates"))
+            dn = any(n.kind in ("OU", "Container") for n in err.candidates)
+            self.status.print(self._nodes_table(err.candidates, "Candidates", dn=dn))
         if err.hint:
             self.status.print(Text(f"hint: {err.hint}", style="dim"))
 

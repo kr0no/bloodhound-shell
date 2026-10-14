@@ -30,6 +30,7 @@ from bhshell.queries.edges import (
     DELEGATION_EDGES,
     ENABLE_EDGES,
     EXEC_EDGES,
+    GPO_EDIT_EDGES,
     HAS_SESSION,
     MEMBER_OF,
     severity_rank,
@@ -62,8 +63,7 @@ TAKEOVER = {
     "WriteAccountRestrictions": "RBCD",
 }
 TAKEOVER_EDGES = frozenset(TAKEOVER)
-GPO_CONTROL_EDGES = frozenset({"GenericAll", "GenericWrite", "WriteDacl", "WriteOwner", "Owns", "WriteGPLink",
-                               "OwnsLimitedRights", "WriteOwnerLimitedRights"})
+GPO_CONTROL_EDGES = GPO_EDIT_EDGES | {"WriteGPLink"}
 CA_CONTROL_EDGES = frozenset({"ManageCA", "ManageCertificates"})
 RELAY_EDGES = COERCION_EDGES - {ESC8_EDGE}
 FOREIGN_EDGES = ACL_EDGES | EXEC_EDGES | {MEMBER_OF}

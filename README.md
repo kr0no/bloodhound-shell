@@ -35,6 +35,10 @@ $ bhshell --url http://127.0.0.1:8080
 
 [bh: shell] > user CORP\svc_sql --all -o svc_sql.csv
 
+[bh: shell] > ou corp.local -t
+
+[bh: shell] > computer WEB01 -G
+
 [bh: shell] > path --owned -g
 ```
 
@@ -45,6 +49,7 @@ The same commands run non-interactively for scripting: `bhshell -c "hunt --json"
 | Command | Shows |
 |---|---|
 | `user`, `computer`, `group`, `lookup` | Kerberoastable / AS-REP roastable, delegation, password age, Tier Zero and owned flags, plus group nesting, inbound/outbound ACL control, sessions and local admin rights |
+| `ou` | OUs, containers and whole domains: the OU tree with object, Tier Zero and owned counts, every object below an OU, the GPOs that apply (enforced links, blocked inheritance) and who outside Tier Zero can edit them, and who controls the OU; `user`/`computer -G` shows the GPOs applied to one object. Same-named OUs are picked by distinguished name |
 | `search` | Objects matching property filters (`search -t user hasspn enabled`), with dates, ages (`90d`) and wildcards |
 | `path` | Shortest paths to a target or to Tier Zero, from everything owned, or through `--via` steps; printed as hop chains, a terminal graph, or SVG/PNG for reports |
 | `hunt` | Domain-wide checks by severity: DCSync, control of Tier Zero, AD CS (ESC*), Kerberoasting, privileged sessions, LAPS/gMSA readers, passwords in attributes, takeover primitives (Shadow Credentials, RBCD), GPO control, NTLM relay, trusts, possible honeytokens...; `hunt --owned` limits them to what your owned objects can do |

@@ -318,16 +318,21 @@ class ADObject:
 
     @staticmethod
     def wrap(node: Node) -> ADObject:
-        cls = {"User": User, "Computer": Computer, "Group": Group}.get(node.kind, ADObject)
-        return cls(node)
+        kinds = {"User": User, "Computer": Computer, "Group": Group,
+                 "OU": DirectoryContainer, "Container": DirectoryContainer, "Domain": DirectoryContainer}
+        return kinds.get(node.kind, ADObject)(node)
 
     def _common_head(self) -> list[SummaryField]:
-        return [
+        oid = "Object ID (GUID)" if self.node.kind in ("OU", "Container", "GPO") else "Object ID (SID)"
+        fields = [
             SummaryField("Name", self.node.name),
             SummaryField("Type", self.node.kind),
-            SummaryField("Object ID (SID)", self.node.objectid),
+            SummaryField(oid, self.node.objectid),
             SummaryField("Domain", self.node.domain),
         ]
+        if self.props.get("distinguishedname"):
+            fields.append(SummaryField("Distinguished Name", self.props["distinguishedname"]))
+        return fields
 
     def _common_tail(self) -> list[SummaryField]:
         return [
@@ -400,3 +405,19 @@ class Group(ADObject):
             SummaryField("AdminCount", admincount, "bool", _risk_if(admincount, "medium")),
             *self._common_tail(),
         ]
+
+
+class DirectoryContainer(ADObject):
+    """An OU, a container or a domain: the nodes of the directory tree."""
+
+    def summary(self) -> list[SummaryField]:
+        p = self.props
+        fields = self._common_head()
+        if self.node.kind == "Domain":
+            fields.append(SummaryField("Functional Level", p.get("functionallevel") or ""))
+        if self.node.kind == "OU":
+            blocks = opt_bool(p, "blocksinheritance")
+            fields.append(SummaryField("Blocks GPO Inheritance", blocks, "bool", _risk_if(blocks, "info")))
+        if p.get("whencreated"):
+            fields.append(SummaryField("Created", p["whencreated"], "date"))
+        return [*fields, *self._common_tail()]
