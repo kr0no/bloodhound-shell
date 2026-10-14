@@ -13,6 +13,7 @@ from bhshell.queries.service import EntityService
 
 TRUSTS_QUERY = "MATCH p=(a:Domain)-[r]->(b:Domain) RETURN p"
 REST_DOMAINS_NOTE = "Cypher is unavailable: enabled and Tier Zero counts need it."
+_COUNT_KEYS = ("users", "enabled_users", "computers", "enabled_computers", "groups", "tier_zero")
 
 
 @dataclass
@@ -125,6 +126,10 @@ class DomainService:
             functional_level=str(props.get("functionallevel") or ""),
             last_collected=str(props.get("lastcollected") or props.get("lastseen") or "")[:19],
         )
+        if collected is False:  # only known through trusts: no objects to count
+            info.last_collected = ""
+            info.counts = dict.fromkeys(_COUNT_KEYS)
+            return info
         in_domain, enabled = f"n.domain = {Q.lit(name.upper())}", "n.enabled = true"
         info.counts = {
             "users": self._count("(n:User)", in_domain),
@@ -140,6 +145,9 @@ class DomainService:
         """A domain from the REST API: the domain entity carries its object counts."""
         sid = item.get("id", "")
         info = DomainInfo(name=item.get("name", sid), sid=sid, collected=item.get("collected"))
+        if info.collected is False:
+            info.counts = dict.fromkeys(_COUNT_KEYS)
+            return info
         try:
             data = (self.client.get(f"api/v2/domains/{sid}", counts="true") or {}).get("data") or {}
         except NotFoundError:

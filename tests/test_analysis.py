@@ -219,6 +219,15 @@ def test_domains_overview(client: BHClient, mocked: responses.RequestsMock) -> N
     assert infos[0].counts["users"] == 7
 
 
+def test_uncollected_domains_have_no_counts(client: BHClient, mocked: responses.RequestsMock) -> None:
+    mocked.add(responses.GET, f"{BASE}api/v2/available-domains",
+               json={"data": [{"type": "active-directory", "name": "DEV.CORP.LOCAL", "id": "S-1-5-21-2000",
+                               "collected": False}]})
+    infos = {d.name: d for d in DomainService(EntityService(client)).domains()}
+    dev = infos["DEV.CORP.LOCAL"]
+    assert dev.collected is False and dev.last_collected == "" and set(dev.counts.values()) == {None}
+
+
 def test_domains_overview_without_cypher(client: BHClient, mocked: responses.RequestsMock) -> None:
     mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
     mocked.add(responses.GET, f"{BASE}api/v2/available-domains", json={"data": [

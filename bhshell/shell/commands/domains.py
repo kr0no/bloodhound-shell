@@ -14,7 +14,7 @@ from bhshell.shell.commands.base import BaseCommands, add_output_args
 DOMAIN_COLS = [
     Column("Domain", "name"), Column("SID", "sid"), Column("Level", "functional_level"),
     Column("Users (enabled)", "users_fmt"), Column("Computers (enabled)", "computers_fmt"),
-    Column("Groups", "groups"), Column("Tier Zero", "tier_zero"), Column("Last collected", "last_collected"),
+    Column("Groups", "groups"), Column("Tier Zero", "tier_zero"), Column("Last collected", "last_fmt"),
 ]
 TRUST_COLS = [
     Column("Trusting (source)", "trusting"), Column("Trusted (target)", "trusted"), Column("Kind", "kind"),
@@ -27,6 +27,13 @@ def _output_parser(description: str) -> Cmd2ArgumentParser:
     p = Cmd2ArgumentParser(description=description)
     add_output_args(p)
     return p
+
+
+def _collected(collected: bool | None, when: str) -> str:
+    """`2026-10-14 22:12 UTC`, or `not collected` for a domain only known through trusts."""
+    if collected is False:
+        return "not collected"
+    return f"{when.replace('T', ' ')[:16]} UTC" if when else "-"
 
 
 def _pair(total: object, enabled: object) -> str:
@@ -50,7 +57,8 @@ class DomainCommands(BaseCommands):
             app.poutput(export.to_json(rows))
         else:
             display = [{**r, "users_fmt": _pair(r["users"], r["enabled_users"]),
-                        "computers_fmt": _pair(r["computers"], r["enabled_computers"])} for r in rows]
+                        "computers_fmt": _pair(r["computers"], r["enabled_computers"]),
+                        "last_fmt": _collected(r["collected"], r["last_collected"])} for r in rows]
             app.ui.table("Domains", DOMAIN_COLS, display, notes=service.notes)
         if args.output:
             fields = list(rows[0]) if rows else ["name"]
