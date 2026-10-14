@@ -179,7 +179,10 @@ def _matches(node: Node, ident: Identifier, kinds: tuple[str, ...]) -> bool:
     sam = ident.sam.upper()
     name = node.name.upper()
     node_sam = node.samaccountname.upper()
-    if node.kind == "Computer":
+    if node.kind == "Computer" and "@" in ident.fqdn and kinds != ("Computer",):
+        # NAME@DOMAIN names a user or a group: a computer only in its NAME$@DOMAIN form.
+        ok = sam.endswith("$") and node_sam == sam
+    elif node.kind == "Computer":
         host = sam.rstrip("$")
         ok = name == ident.fqdn or name.split(".", 1)[0] == host or node_sam == f"{host}$"
     elif node.kind not in ENTITY_KINDS:  # Domain, OU, GPO, Container: match the full name

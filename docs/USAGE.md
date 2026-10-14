@@ -38,6 +38,7 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 
 `NAME` accepts `jdoe`, `jdoe@corp.local`, `CORP\jdoe`, `WS01`, `WS01$`, `WS01.corp.local`, a SID,
 or a distinguished name (`CN=jdoe,OU=Staff,DC=corp,DC=local`). `-d/--domain` restricts the domain.
+With `lookup`, `NAME@DOMAIN` means a user or a group; a computer is `WS01`, `WS01$@corp.local` or its FQDN.
 When a name exists in more than one domain the command stops and lists the candidates (domain + SID);
 re-run it with a qualified name. Same-named OUs in one domain are listed with their distinguished
 names; pass the DN (or the object ID) to pick one.

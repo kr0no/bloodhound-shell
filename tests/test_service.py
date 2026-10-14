@@ -39,6 +39,21 @@ def test_literal_rows_split_on_repeated_keys() -> None:
     assert literal_rows(literals) == [{"name": "A", "n": 1}, {"name": "B", "n": 2}, {"name": "C"}]
 
 
+def test_name_at_domain_means_a_user_or_group(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    sql_user = {"kind": "User", "kinds": ["Base", "User"], "objectId": f"{WS01}-u",
+                "properties": {"name": "WS01@CORP.LOCAL", "objectid": f"{WS01}-u", "samaccountname": "ws01",
+                               "domain": "CORP.LOCAL"}}
+    # A service account named like a computer: both come back for the name search.
+    both = Graph.from_cypher(graph(["4", "u"], [], nodes={**NODES, "u": sql_user})["data"])
+    monkeypatch.setattr(svc, "run_cypher", lambda query: both)
+    assert svc.resolve("ws01@corp.local").kind == "User"
+    assert svc.resolve("WS01$@corp.local").kind == "Computer"
+    assert svc.resolve("ws01@corp.local", "Computer").kind == "Computer"
+    with pytest.raises(AmbiguousMatchError):
+        svc.resolve("ws01")
+
+
 def test_cypher_literal_escaping() -> None:
     assert Q.lit("O'Brien\\x") == "'O\\'Brien\\\\x'"
 
