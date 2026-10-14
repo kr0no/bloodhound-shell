@@ -57,6 +57,16 @@ def _write_private(path: Path, content: str) -> None:
     os.chmod(path, 0o600)
 
 
+def _absolute_dirs(setting: str) -> str:
+    """`query_dirs` with relative folders made absolute, so the setting works from any directory.
+
+    `~` and absolute folders are kept as written.
+    """
+    parts = [p.strip() for p in setting.split(os.pathsep) if p.strip()]
+    return os.pathsep.join(p if p.startswith("~") or Path(p).is_absolute() else str(Path(p).absolute())
+                           for p in parts)
+
+
 @dataclass
 class Config:
     url: str = DEFAULT_URL
@@ -107,7 +117,11 @@ class Config:
         if isinstance(default, (int, float)):
             if isinstance(value, bool):
                 raise TypeError(f"expected a number, got {value!r}")
-            number = type(default)(value)
+            try:
+                number = type(default)(value)
+            except ValueError:
+                raise ValueError(f"expected {'a whole number' if isinstance(default, int) else 'a number'}, "
+                                 f"got {value!r}") from None
             if not math.isfinite(number):
                 raise ValueError(f"not a finite number: {value!r}")
             minimum = _MINIMUMS.get(key)
@@ -118,6 +132,8 @@ class Config:
             from bhshell.client.client import normalize_url  # late: the client imports this module
 
             return normalize_url(str(value))
+        if key == "query_dirs":
+            return _absolute_dirs(str(value))
         return str(value)
 
     def save(self) -> None:

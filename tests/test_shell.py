@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +197,19 @@ def test_config_rejects_invalid_values(shell: BHShell) -> None:
     assert "Invalid value for verify_tls" in run(shell, "config verify_tls maybe")
     run(shell, "config display_rows 0")
     assert shell.config.display_rows == 0 and shell.config.page_size == 500
+
+
+def test_config_number_errors_say_what_is_expected(shell: BHShell) -> None:
+    out = run(shell, "config display_rows abc")
+    assert "expected a whole number, got 'abc'" in out and "invalid literal" not in out
+    assert "expected a number, got 'soon'" in run(shell, "config read_timeout soon")
+
+
+def test_config_query_dirs_are_stored_absolute(shell: BHShell, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    run(shell, f"config query_dirs q{os.pathsep}~/team{os.pathsep}/srv/queries")
+    assert shell.config.query_dirs == os.pathsep.join([str(tmp_path / "q"), "~/team", "/srv/queries"])
 
 
 def test_config_load_validates(bhshell_home: Path) -> None:

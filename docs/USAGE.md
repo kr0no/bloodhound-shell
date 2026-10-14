@@ -463,7 +463,8 @@ config query_dirs ''                 # back to the default (no extra folders)
 ```
 
 Only the `.cyp` files directly inside each folder are loaded (not subfolders). A folder that does not
-exist is reported in a note under `query list`.
+exist is reported in a note under `query list`. A relative folder (`queries`) is saved as an absolute
+path, so the setting works wherever bhshell is started.
 
 ## How it works
 
