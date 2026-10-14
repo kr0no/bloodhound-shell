@@ -516,11 +516,13 @@ could otherwise be piped to a system shell. Use `-o FILE` instead.
 
 ## Compatibility
 
-bhshell targets BloodHound CE v9 and is tested against v9.7.1. It relies on the `Tag_Tier_Zero`
+bhshell targets BloodHound CE v9 and is tested against v9.7.1 and v9.8.0. It relies on the `Tag_Tier_Zero`
 and `Tag_Owned` kinds and on the privilege-zone (`asset-group-tags`) API, so releases before
 privilege zones are not supported. The object counts of `ou` use aggregate Cypher
 (`RETURN labels(n), count(n)`); a server that rejects it still gets the views, without counts.
 
 `owned add` / `hvt add` create a selector named `bhshell: <object>` in the Owned label or the
 Tier Zero tier. `remove` only deletes selectors seeded with that object alone, so nothing else
-gets unmarked. Changes show up after BH's next analysis run.
+gets unmarked. Changes show up after BH's next analysis run (about a minute): until then a removed
+object still shows as owned, and a second `remove` says so. An object marked by a rule-based
+selector can only be unmarked in the BH UI (Privilege Zones).

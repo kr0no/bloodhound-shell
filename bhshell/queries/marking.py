@@ -103,7 +103,13 @@ class MarkingService:
                               f"{', '.join(shared)}",
                               hint="Edit those selectors in the BH UI to unmark just this object.")
             if _tagged(node, tag_obj):
-                raise BHError(f"{node.name} is in '{tag_name}' through a rule-based selector, not one naming it",
+                rules = [s for s in self.client.paginate(base)
+                         if any(seed.get("type") != _SEED_OBJECT_ID for seed in s.get("seeds") or [])]
+                if not rules:  # its own selector is gone: the tag stays until the next analysis
+                    return (f"No selector in '{tag_name}' targets {node.name} any more; it stays tagged until "
+                            "BloodHound's next analysis.")
+                raise BHError(f"{node.name} is in '{tag_name}' through a rule-based selector ({len(rules)} in the "
+                              "tag), not one naming it",
                               hint="Change that selector in the BH UI (Privilege Zones) to unmark it.")
             raise NotFoundError(f"No selector in '{tag_name}' targets {node.name}")
         message = f"Removed {removed} selector(s) for {node.name} from '{tag_name}'."
