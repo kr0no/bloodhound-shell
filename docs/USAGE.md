@@ -36,10 +36,11 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 
 ### Naming objects
 
-`NAME` accepts `jdoe`, `jdoe@corp.local`, `CORP\jdoe`, `WS01`, `WS01$`, `WS01.corp.local`, a SID,
-or a distinguished name (`CN=jdoe,OU=Staff,DC=corp,DC=local`). `-d/--domain` restricts the domain.
-With `lookup`, `NAME@DOMAIN` means a user or a group; a computer is `WS01`, `WS01$@corp.local` or its FQDN.
-When a name exists in more than one domain the command stops and lists the candidates (domain + SID);
+`NAME` accepts `alice`, `alice@phantom.corp`, `PHANTOM\alice`, `FILESERVER01`, `FILESERVER01$`,
+`FILESERVER01.phantom.corp`, a SID, or a distinguished name
+(`CN=ALICE,OU=USERS,OU=TIER1,DC=PHANTOM,DC=CORP`). `-d/--domain` restricts the domain. With
+`lookup`, `NAME@DOMAIN` means a user or a group; a computer is `FILESERVER01`,
+`FILESERVER01$@phantom.corp` or its FQDN. When a name exists in more than one domain the command stops and lists the candidates (domain + SID);
 re-run it with a qualified name. Same-named OUs in one domain are listed with their distinguished
 names; pass the DN (or the object ID) to pick one.
 
@@ -72,10 +73,10 @@ filtered properties as columns:
 ```
 search -t user hasspn enabled                          # Kerberoastable candidates
 search -t user 'description~pass'                      # passwords in descriptions
-search -t computer operatingsystem~2012 -d CORP        # by OS, in one domain
+search -t computer operatingsystem~2019 -d PHANTOM     # by OS, in one domain
 search -t user pwdneverexpires 'pwdlastset<2019-01-01' -c lastlogon -o old.csv
 search -t user enabled 'lastlogontimestamp<90d'        # enabled, no logon for 90 days
-search name=svc_* !enabled                             # any type, disabled svc_ accounts
+search name=sm_* !enabled                              # any type, disabled SM_ mailbox accounts
 ```
 
 | Filter | Meaning |
@@ -94,27 +95,28 @@ fetched (default `max_results`, with a note when there are more) and `-n` the ro
 ### Exploring OUs
 
 `ou NAME` looks at an OU, a container (`CN=Users`) or a whole domain: where it sits, what is below
-it, the GPOs that apply to it and who controls it. `NAME` is `SERVERS`, `SERVERS@corp.local`, a
-distinguished name (`OU=Web,OU=Servers,DC=corp,DC=local`), an object ID (GUID), or a domain
-(`corp.local`). `search -t OU` lists the OUs, and `ou corp.local -t` shows them as a tree.
+it, the GPOs that apply to it and who controls it. `NAME` is `WORKSTATIONS`,
+`WORKSTATIONS@phantom.corp`, a distinguished name (`OU=COMPUTERS,OU=TIER1,DC=PHANTOM,DC=CORP`), an
+object ID (GUID), or a domain (`phantom.corp`). `search -t OU` lists the OUs, and
+`ou phantom.corp -t` shows them as a tree.
 
-Several OUs often share a name (`Staff` under two parents). The command then stops and lists the
-candidates with their distinguished names; re-run it with the DN.
+Several OUs often share a name (`USERS` under both `TIER0` and `TIER1`). The command then stops
+and lists the candidates with their distinguished names; re-run it with the DN.
 
 ```
-ou corp.local -t                                   # the whole OU tree of a domain
-ou SERVERS@corp.local                              # summary: location, objects below, linked GPOs
-ou 'OU=Web,OU=Servers,DC=corp,DC=local' -G         # GPOs applied to everything in it
-ou SERVERS@corp.local -c -o servers.csv            # every object below it, with its location
-ou SERVERS@corp.local -I                           # who can link GPOs to it or take it over
-ou CN=Users,DC=corp,DC=local                       # containers work too
-computer WEB01 -G                                  # the GPOs that apply to one computer
-user CORP\jdoe -G                                  # ... or to one user
+ou phantom.corp -t                                                # the whole OU tree of a domain
+ou WORKSTATIONS@phantom.corp                                      # summary: location, objects below, linked GPOs
+ou 'OU=SHARPHOUND,OU=COMPUTERS,OU=TIER0,DC=PHANTOM,DC=CORP' -G    # GPOs applied to everything in it
+ou TIER1@phantom.corp -c -o tier1.csv                             # every object below it, with its location
+ou TIER1@phantom.corp -I                                          # who can link GPOs to it or take it over
+ou CN=Users,DC=phantom,DC=corp                                    # containers work too
+computer DF-MS-SHS -G                                             # the GPOs that apply to one computer
+user PHANTOM\alice -G                                             # ... or to one user
 ```
 
 | Flag | View |
 |---|---|
-| (none) | Summary: distinguished name, whether the OU blocks GPO inheritance, creation date, location (`CORP.LOCAL > SERVERS`), users / computers / groups below it at any depth (enabled ones in brackets), other objects below it (certificate templates, CAs, ...; only when there are some), OUs and containers below it, Tier Zero and owned objects below it, and the GPOs linked to it (`(enforced)` marked) |
+| (none) | Summary: distinguished name, whether the OU blocks GPO inheritance, creation date, location (`PHANTOM.CORP > TIER1`), users / computers / groups below it at any depth (enabled ones in brackets), other objects below it (certificate templates, CAs, ...; only when there are some), OUs and containers below it, Tier Zero and owned objects below it, and the GPOs linked to it (`(enforced)` marked) |
 | `-t, --tree` | The OUs and containers below it, drawn as a tree with the object itself first |
 | `-c, --contents` | Every object below it at any depth (OUs and containers excluded) |
 | `-G, --gpos` | The GPOs applied to the objects in it, in precedence order, and who outside Tier Zero can edit them |
@@ -128,7 +130,7 @@ Each row counts everything below that entry, not only its direct children:
 
 | Column | Meaning |
 |---|---|
-| Users (enabled), Computers (enabled), Groups | Objects anywhere below it; `135 (42)` is 135 computers, 42 of them enabled |
+| Users (enabled), Computers (enabled), Groups | Objects anywhere below it; `20 (19)` is 20 users, 19 of them enabled |
 | T0 below, Owned below | Tier Zero and owned objects anywhere below it |
 | GPO links | GPOs linked directly to it |
 | Blocks inheritance | The OU blocks GPO inheritance (OUs only) |
@@ -143,24 +145,25 @@ counts and without hiding anything.
 
 Objects are listed Tier Zero first, then owned, then users, computers and groups, with disabled
 accounts after enabled ones. **Location** is the path of sub-OUs from the explored one down to the
-object (`WEB/DMZ`), or `direct` for its direct children; **Depth** counts the levels. The list
-stops at `max_results` objects, with a note giving the server's real total; raise it with
-`config max_results N`, or use `-o FILE` to export what was fetched.
+object (`COMPUTERS/SHARPHOUND` under `TIER0`), or `direct` for its direct children; **Depth**
+counts the levels. The list stops at `max_results` objects, with a note giving the server's real
+total; raise it with `config max_results N`, or use `-o FILE` to export what was fetched.
 
 #### Applied GPOs
 
 `-G` follows the OU chain from the domain down to the object (or to the explored OU, for `ou`)
 and evaluates each GPO link on it the way Windows does:
 
-* **Linked to** is where the link sits, from the domain down (`CORP.LOCAL/SERVERS/WEB`): OU names
-  such as `Users` often repeat within a domain. `--json` and `-o` also give the OU's name.
+* **Linked to** is where the link sits, from the domain down
+  (`PHANTOM.CORP/TIER0/COMPUTERS/SHARPHOUND`): OU names such as `COMPUTERS` often repeat within a
+  domain. `--json` and `-o` also give the OU's name.
 * An OU that **blocks inheritance** stops the GPOs linked above it, unless the link is
-  **enforced**. Such links are listed as `no (inheritance blocked at SERVERS)`.
+  **enforced**. Such links are listed as `no (inheritance blocked at TIER0)`.
 * Rows are in **precedence** order, the first one winning when two GPOs set the same thing:
   enforced links first (the one highest in the tree wins), then the other links from the closest
   OU up to the domain, then the links that do not apply.
 * A GPO linked at several levels is applied once. Its later links are marked
-  `yes (duplicate: already applied through CORP.LOCAL)`.
+  `yes (duplicate: already applied through PHANTOM.CORP)`.
 * **Editable by (outside Tier Zero)** lists the principals outside Tier Zero with `GenericAll`,
   `GenericWrite`, `WriteDacl`, `WriteOwner` or `Owns` (and their limited-rights variants) over the
   GPO, owned ones first and marked `(owned)`. Editing a GPO runs code on every computer or user it
@@ -200,22 +203,22 @@ distinguished name names.
 
 `gpo NAME` shows where a GPO is linked, which users and computers it applies to and who can edit
 it. It is the next step after `hunt gpo-control`: once you know someone can edit a GPO, `gpo`
-tells you what editing it gets you. `NAME` is the display name, `NAME@corp.local`, the
-distinguished name (`CN={31B2F340-...},CN=Policies,CN=System,DC=corp,DC=local`) or the object ID.
-Display names often contain spaces, so quote them.
+tells you what editing it gets you. `NAME` is the display name, `NAME@phantom.corp`, the
+distinguished name (`CN={31B2F340-016D-11D2-945F-00C04FB984F9},CN=Policies,CN=System,DC=phantom,DC=corp`)
+or the object ID. Display names often contain spaces, so quote them.
 
 ```
-gpo 'Default Domain Policy' -d corp.local          # summary
-gpo 'WEB HARDENING@corp.local' -l                  # where it is linked and what each link reaches
-gpo 'WEB HARDENING@corp.local' -c -o web.csv       # every user and computer it applies to
-gpo 'WEB HARDENING@corp.local' -I                  # everyone with rights over it, Tier Zero included
+gpo 'Default Domain Policy' -d phantom.corp        # summary
+gpo 'ENABLE AV@phantom.corp' -l                    # where it is linked and what each link reaches
+gpo 'ENABLE AV@phantom.corp' -c -o enable-av.csv   # every user and computer it applies to
+gpo 'ENABLE AV@phantom.corp' -I                    # everyone with rights over it, Tier Zero included
 ```
 
 | Flag | View |
 |---|---|
 | (none) | Summary: distinguished name, SYSVOL path, creation date, where it is linked (`(enforced)` marked), the OUs where blocked inheritance stops it, the computers and users it applies to (enabled ones in brackets), how many of them are Tier Zero or owned, and the principals outside Tier Zero that can edit it |
 | `-l, --links` | One row per link: whether it is enforced, the users and computers it reaches, the Tier Zero and owned ones among them, and the OUs that stop it |
-| `-c, --affected` | Every user and computer it applies to: Tier Zero first, then owned, computers before users. **Location** is the path from the linked domain or OU down to the object's container (`CORP.LOCAL/STAFF`) |
+| `-c, --affected` | Every user and computer it applies to: Tier Zero first, then owned, computers before users. **Location** is the path from the linked domain or OU down to the object's container (`PHANTOM.CORP/DOMAIN CONTROLLERS`) |
 | `-I, --inbound` | Principals with dangerous rights over it (as for users) |
 | `-a, --all` | Summary plus every view |
 | `-d`, `-n`, `--json`, `-o FILE` | As for the other entity commands |
@@ -240,15 +243,15 @@ include those extra objects, and have no location), and `-l` is not available.
 `ca NAME` shows an Enterprise CA and `template NAME` a certificate template. `hunt adcs` lists the
 ESC edges BloodHound found; these two commands show the CA and the template behind a finding, and
 what a template allows when BloodHound found no edge. `NAME` is the name BloodHound shows
-(`CORP-CA@corp.local`, `USER@corp.local`; for templates the short name, not the display name), the
-distinguished name or the object ID. `search -t EnterpriseCA` and `search -t CertTemplate` list
-them.
+(`PHANTOM-DC01-CA@phantom.corp`, `USER@phantom.corp`; for templates the short name, not the
+display name), the distinguished name or the object ID. `search -t EnterpriseCA` and
+`search -t CertTemplate` list them.
 
 ```
-ca CORP-CA@corp.local                              # summary
-ca CORP-CA@corp.local -t                           # published templates and their ESC conditions
-template USER@corp.local                           # one template
-template WEBSERVER@corp.local -I                   # everyone with rights over it, Tier Zero included
+ca PHANTOM-DC01-CA@phantom.corp                    # summary
+ca PHANTOM-DC01-CA@phantom.corp -t                 # published templates and their ESC conditions
+template ESC1@phantom.corp                         # one template
+template WEBSERVER@phantom.corp -I                 # everyone with rights over it, Tier Zero included
 ```
 
 | Flag | View |
@@ -288,13 +291,13 @@ enrollment rights need Cypher.
 ### Attack paths
 
 ```
-path CORP\svc_sql 'domain admins@corp.local'             # shortest path (BloodHound's native pathfinder)
-path CORP\svc_sql                                        # all shortest paths to any Tier Zero object
-path --owned -o owned-paths.csv                          # from every owned object to Tier Zero
-path --owned 'file server 01'                            # from every owned object to another objective
-path CORP\svc_sql --via WS01 'domain admins@corp.local'  # through WS01 on the way
-path CORP\svc_sql --via WS01 --via 'it admins'           # several steps, then on to Tier Zero
-path CORP\svc_sql --exclude sessions --exclude relay     # ignore techniques you can't or won't use
+path PHANTOM\svc_kerb_del 'domain admins@phantom.corp'                       # shortest path (BloodHound's native pathfinder)
+path PHANTOM\svc_kerb_del                                                      # all shortest paths to any Tier Zero object
+path --owned -o owned-paths.csv                                                # from every owned object to Tier Zero
+path --owned FILESERVER01                                                      # from every owned object to another objective
+path PHANTOM\svc_kerb_del --via ADMINSERVER01 'domain admins@phantom.corp'     # through ADMINSERVER01 on the way
+path PHANTOM\svc_kerb_del --via ADMINSERVER01 --via KRB-DEL-01                 # several steps, then on to Tier Zero
+path PHANTOM\svc_kerb_del --exclude sessions --exclude adcs                    # ignore techniques you can't or won't use
 ```
 
 `--via` steps are visited in the order given. Each leg is searched on its own and the results are
@@ -317,8 +320,13 @@ group. Such objects are marked `[disabled]`. Paths needing any other disabled ob
 and the objects listed in a note; the search then finds the next-shortest path around them.
 `--include-disabled` turns this off. The source and an explicit destination are always allowed.
 
-Paths are printed as hop chains (`A ─GenericWrite→ B ─AddMember→ C [T0]`), coloured by edge severity,
-with a header line giving the number of paths, the shortest length, the fewest actions and the
+Paths are printed as hop chains, coloured by edge severity:
+
+```
+SMSASIMON@PHANTOM.CORP ─AddAllowedToAct→ JONAS-TEST-MS01.PHANTOM.CORP ─HasSession→ ADMINISTRATOR@PHANTOM.CORP [T0]
+```
+
+A header line gives the number of paths, the shortest length, the fewest actions and the
 distinct first hops. Paths are ordered by the fewest *actions* first (hops the operator has to
 carry out, counting `MemberOf`, `Contains`, `GPLink` and `DCFor` as free since rights flow along
 them on their own) then by the fewest session-dependent hops, then by length. The shortest path is
@@ -335,16 +343,33 @@ also narrows the list, `--json` and `-o`: `path --owned -g -p 2`. With `-c`/`-s`
 asks.
 
 ```
-          ╭──────────────────╮
-          │ ● HELPDESK OWNED │
-          ╰─────────┬────────╯
-   ╭─ GenericWrite ─┤
-   │                ╰───────────╮ ForceChangePassword
-   ▼                            ▼
-╭───────────╮               ╭────────╮
-│ ● SVC_SQL │               │ ● JDOE │
-╰─────┬─────╯               ╰────┬───╯
+           ╭────────────────╮
+           │ ● SVC_KERB_DEL │
+           ╰────────┬───────╯
+                    │ MemberOf
+                    ▼
+           ╭────────────────╮
+           │ ● DOMAIN USERS │
+           ╰────────┬───────╯
+                    │ AdminTo
+                    ▼
+           ╭─────────────────╮
+           │ ● ADMINSERVER01 │
+           ╰────────┬────────╯
+      ╭ HasSession ─┤
+      │             ╰ HasSession ─╮
+      ▼                           ▼
+╭───────────╮              ╭─────────────╮
+│ ● ANDY T0 │              │ ● FABIAN T0 │
+╰─────┬─────╯              ╰──────┬──────╯
+      │             ╭─ MemberOf ──╯
+      ╰─ MemberOf ──┤
+                    ▼
+         ╭────────────────────╮
+         │ ● DOMAIN ADMINS T0 │
+         ╰────────────────────╯
 ```
+
 Sources and targets can be users, computers, groups, domains, OUs, GPOs, certificate templates
 or CA objects (Enterprise, root and AIA CAs, the NTAuth store). Owned objects that are
 already Tier Zero are listed in a note.
@@ -403,7 +428,7 @@ session". Naming a check that is not scoped (`hunt kerberoastable --owned`) is a
 ```console
 [bh: shell] > hunt --owned
 [bh: shell] > hunt tier-zero-control cred-readers --owned
-[bh: shell] > hunt --all --from CORP\helpdesk
+[bh: shell] > hunt --all --from t1_tonymontana@phantom.corp
 ```
 
 When a check hits `max_results`, the summary shows the server-side total (`~9985`) from a

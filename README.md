@@ -27,19 +27,20 @@ $ bhshell --url http://127.0.0.1:8080
 [+] Logged in as admin on 127.0.0.1:8080
 
 [bh: shell] > hunt
-  Severity   Check            Count   Example              Description
-  critical   dcsync           2       SVC_SQL@CORP.LOCAL   Non-Tier-Zero principals with replication rights
-  high       kerberoastable   2       JDOE@CORP.LOCAL      Kerberoastable users
+  Severity   Check            Count   Example                      Description
+  critical   dcsync           4       DCSYNCERS@PHANTOM.CORP       Non-Tier-Zero principals with replication rights
+  critical   adcs             95      ALICE@PHANTOM.CORP           AD CS escalation paths (ESC*, GoldenCert)
+  high       kerberoastable   2       ADMINISTRATOR@PHANTOM.CORP   Kerberoastable users
   ...
-[*] Details: 'hunt CHECK' (e.g. 'hunt kerberoastable'), or 'hunt --all'.
+[*] Details: 'hunt CHECK' (e.g. 'hunt dcsync'), or 'hunt --all'.
 
-[bh: shell] > user CORP\svc_sql --all -o svc_sql.csv
+[bh: shell] > user PHANTOM\svc_kerb_del --all -o svc_kerb_del.csv
 
-[bh: shell] > ou corp.local -t
+[bh: shell] > ou phantom.corp -t
 
-[bh: shell] > computer WEB01 -G
+[bh: shell] > computer DF-MS-SHS -G
 
-[bh: shell] > gpo 'WEB HARDENING@corp.local' -c
+[bh: shell] > gpo 'ENABLE AV@phantom.corp' -c
 
 [bh: shell] > path --owned -g
 ```
