@@ -75,8 +75,12 @@ def _label(kind: str | None) -> str:
     return f":{kind}" if kind else ":Base"
 
 
-def by_objectid(objectid: str) -> str:
-    return f"MATCH (n:Base) WHERE n.objectid = {lit(objectid)} RETURN n"
+def by_objectid(objectid: str, *, any_domain: bool = False) -> str:
+    """`any_domain`: also the `DOMAIN-SID` objects BloodHound makes of a well-known SID."""
+    cond = f"n.objectid = {lit(objectid)}"
+    if any_domain:
+        cond = f"({cond} OR n.objectid ENDS WITH {lit('-' + objectid)})"
+    return f"MATCH (n:Base) WHERE {cond} RETURN n"
 
 
 def dn_condition(dn: str) -> str:

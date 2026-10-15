@@ -38,7 +38,8 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 
 `NAME` accepts `alice`, `alice@phantom.corp`, `PHANTOM\alice`, `FILESERVER01`, `FILESERVER01$`,
 `FILESERVER01.phantom.corp`, a SID, or a distinguished name
-(`CN=ALICE,OU=USERS,OU=TIER1,DC=PHANTOM,DC=CORP`). `-d/--domain` restricts the domain. With
+(`CN=ALICE,OU=USERS,OU=TIER1,DC=PHANTOM,DC=CORP`). `-d/--domain` restricts the domain. A well-known
+SID (`S-1-5-32-544`, `S-1-5-11`) names that group in every domain, so `-d` picks one. With
 `lookup`, `NAME@DOMAIN` means a user or a group; a computer is `FILESERVER01`,
 `FILESERVER01$@phantom.corp` or its FQDN. When a name exists in more than one domain the command stops and lists the candidates (domain + SID);
 re-run it with a qualified name. Same-named OUs in one domain are listed with their distinguished

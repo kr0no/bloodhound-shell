@@ -45,6 +45,8 @@ ADCS_KINDS = ("EnterpriseCA", "CertTemplate")
 PATH_KINDS = (*ENTITY_KINDS, "Domain", "OU", "GPO", "Container", *ADCS_KINDS, "RootCA", "AIACA", "NTAuthStore",
               "IssuancePolicy")
 _SID_RE = re.compile(r"(^|-)S-1-\d+(-\d+)+$", re.IGNORECASE)
+# Well-known SIDs (S-1-5-32-544, S-1-5-11, ...) exist in every domain: BloodHound prefixes them with it.
+_WELL_KNOWN_SID_RE = re.compile(r"^S-1-(?!5-21-)\d+(-\d+)*$", re.IGNORECASE)
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _DN_RE = re.compile(r"^(CN|OU|DC)=.+", re.IGNORECASE)
 DN_HINT = "Use the distinguished name ('OU=Servers,OU=Tier1,DC=corp,DC=local') or the object ID (GUID)."
@@ -141,7 +143,7 @@ def parse_identifier(raw: str, *, domain: str | None = None, kind: str | None = 
     if not text:
         raise ValueError("Empty object name")
     if _SID_RE.search(text) or _GUID_RE.match(text):
-        return Identifier(raw=text, objectid=text.upper())
+        return Identifier(raw=text, objectid=text.upper(), domain=(domain or "").upper())
     if _DN_RE.match(text):
         return Identifier(raw=text, dn=re.sub(r"(?<!\\),\s+", ",", text).upper())
     sam, dom, fqdn = text, "", ""
@@ -161,6 +163,10 @@ def parse_identifier(raw: str, *, domain: str | None = None, kind: str | None = 
     return Identifier(raw=text, sam=sam, domain=dom.upper(), fqdn=fqdn.upper())
 
 
+def is_well_known_sid(objectid: str) -> bool:
+    return bool(_WELL_KNOWN_SID_RE.match(objectid))
+
+
 def _node_domain(node: Node) -> str:
     if node.domain:
         return node.domain.upper()
@@ -174,7 +180,10 @@ def _matches(node: Node, ident: Identifier, kinds: tuple[str, ...]) -> bool:
     if node.kind not in kinds:
         return False
     if ident.objectid:
-        return node.objectid.upper() == ident.objectid
+        oid = node.objectid.upper()
+        if not (oid == ident.objectid or is_well_known_sid(ident.objectid) and oid.endswith("-" + ident.objectid)):
+            return False
+        return not ident.domain or Q.domain_matches(ident.domain, _node_domain(node))
     if ident.dn:
         return str(node.properties.get("distinguishedname") or "").upper() == ident.dn
     sam = ident.sam.upper()
@@ -378,7 +387,7 @@ class EntityService:
 
     def _resolve_cypher(self, ident: Identifier, kind: str | None) -> list[Node]:
         if ident.objectid:
-            query = Q.by_objectid(ident.objectid)
+            query = Q.by_objectid(ident.objectid, any_domain=is_well_known_sid(ident.objectid))
         elif ident.dn:
             query = Q.by_name([Q.dn_condition(ident.dn)], kind, limit=100)
         else:

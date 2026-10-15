@@ -425,3 +425,27 @@ def test_parse_cypher_args() -> None:
     assert args.query == "MATCH p=(a)-[:A|B]->(b) RETURN p"
     quoted = parse_cypher_args('"MATCH (n) WHERE n.name = \'X\' RETURN n"')
     assert quoted.query == "MATCH (n) WHERE n.name = 'X' RETURN n"
+
+
+def _builtin(oid: str, name: str, domain: str) -> dict[str, Any]:
+    return {"kind": "Group", "kinds": ["Base", "Group"], "objectId": oid,
+            "properties": {"name": name, "objectid": oid, "domain": domain}}
+
+
+def test_well_known_sid_matches_its_copy_in_each_domain(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    nodes = {"a": _builtin("CORP.LOCAL-S-1-5-32-544", "ADMINISTRATORS@CORP.LOCAL", "CORP.LOCAL"),
+             "b": _builtin("DEV.CORP.LOCAL-S-1-5-32-544", "ADMINISTRATORS@DEV.CORP.LOCAL", "DEV.CORP.LOCAL")}
+    queries: list[str] = []
+
+    def answer(query: str) -> Graph:
+        queries.append(query)
+        return Graph.from_cypher(graph(list(nodes), [], nodes=nodes)["data"])
+
+    svc = EntityService(client)
+    monkeypatch.setattr(svc, "run_cypher", answer)
+    with pytest.raises(AmbiguousMatchError):
+        svc.resolve("S-1-5-32-544", "Group")
+    assert "n.objectid ENDS WITH '-S-1-5-32-544'" in queries[-1]
+    assert svc.resolve("S-1-5-32-544", "Group", "dev.corp.local").name == "ADMINISTRATORS@DEV.CORP.LOCAL"
+    assert svc.resolve("CORP.LOCAL-S-1-5-32-544", "Group").name == "ADMINISTRATORS@CORP.LOCAL"
+    assert "ENDS WITH" not in Q.by_objectid(JDOE)
