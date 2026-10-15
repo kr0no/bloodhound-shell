@@ -65,6 +65,7 @@ class BHShell(cmd2.Cmd):
         self.entities = EntityService(self.client, max_results=config.max_results)
         self.marking = MarkingService(self.client, self.entities)
         self.ui = Renderer()
+        self.client.waiting = self.ui.waiting
         self.recent_names: deque[str] = deque(maxlen=200)
         # Commands that failed (errors, usage errors, unknown commands); drives the exit code of -c/-s runs.
         self.command_failures = 0

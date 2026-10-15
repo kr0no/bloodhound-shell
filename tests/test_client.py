@@ -6,6 +6,7 @@ import hmac
 import json
 import threading
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -106,6 +107,28 @@ def test_connection_error() -> None:
         rsps.add(responses.GET, "http://127.0.0.1:1/api/v2/self", body=requests.exceptions.ConnectionError())
         with pytest.raises(ConnectionFailed):
             c.self_info()
+
+
+def test_requests_run_inside_the_waiting_hook(client: BHClient) -> None:
+    labels: list[str] = []
+
+    @contextmanager
+    def waiting(label: str):
+        labels.append(label)
+        yield
+
+    client.waiting = waiting
+    client.cypher("MATCH (n:Nope) RETURN n")
+    client.self_info()
+    assert labels == ["Running Cypher query", "Waiting for BH.test:8080"]
+    labels.clear()
+    for _ in client.steps(["a", "b"]):
+        client.cypher("MATCH (n:Nope) RETURN n")
+    for _ in client.steps(["only"]):
+        client.cypher("MATCH (n:Nope) RETURN n")
+    client.self_info()
+    assert labels == ["Running Cypher query (1/2)", "Running Cypher query (2/2)", "Running Cypher query",
+                      "Waiting for BH.test:8080"]
 
 
 def test_paginate_follows_skip() -> None:

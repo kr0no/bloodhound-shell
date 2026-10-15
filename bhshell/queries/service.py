@@ -420,9 +420,8 @@ class EntityService:
         report = EntityReport(node=node, show_summary=show_summary)
         if show_summary:
             report.extra = self._queried_summary(node)
-        for key in views:
-            if node.kind in VIEWS.get(key, ()):
-                report.views.extend(self.view(node, key))
+        for key in self.client.steps([k for k in views if node.kind in VIEWS.get(k, ())]):
+            report.views.extend(self.view(node, key))
         return report
 
     def _queried_summary(self, node: Node) -> list[SummaryField]:

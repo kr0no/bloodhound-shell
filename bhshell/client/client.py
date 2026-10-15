@@ -7,8 +7,9 @@ from __future__ import annotations
 import base64
 import json
 import time
-from collections.abc import Iterator
-from typing import Any, Literal
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, nullcontext
+from typing import Any, Literal, TypeVar
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -31,6 +32,7 @@ from bhshell.errors import (
 )
 
 AuthMode = Literal["none", "jwt", "hmac"]
+T = TypeVar("T")
 
 _MFA_MARKERS = ("otp", "one time", "one-time", "mfa", "totp")
 
@@ -80,6 +82,9 @@ class BHClient:
         self.token_id: str = ""
         self.jwt: str = ""
         self._auth: requests.auth.AuthBase | None = None
+        # Wrapped around every HTTP call with a short label; the shell uses it for its spinner.
+        self.waiting: Callable[[str], AbstractContextManager[Any]] = lambda label: nullcontext()
+        self._step: tuple[int, int] | None = None
 
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": f"bhshell/{__version__}", "Accept": "application/json"})
@@ -150,6 +155,15 @@ class BHClient:
         exp = self.token_expiry()
         return exp is not None and exp <= time.time()
 
+    def steps(self, items: Sequence[T]) -> Iterator[T]:
+        """Iterate `items`, numbering the requests made for each one in the waiting label: `(2/5)`."""
+        try:
+            for i, item in enumerate(items, 1):
+                self._step = (i, len(items))
+                yield item
+        finally:
+            self._step = None
+
     def request(
         self,
         method: str,
@@ -162,16 +176,20 @@ class BHClient:
         if auth and self._auth is None:
             raise NotAuthenticated("Not authenticated")
         url = urljoin(self.base_url, path.lstrip("/"))
+        label = "Running Cypher query" if path.endswith("graphs/cypher") else f"Waiting for {self.host}"
+        if self._step and self._step[1] > 1:
+            label += " ({}/{})".format(*self._step)
         try:
-            resp = self._session.request(
-                method,
-                url,
-                params=params,
-                json=json_body,
-                auth=self._auth if auth else None,
-                timeout=self.timeout,
-                verify=self.verify_tls,
-            )
+            with self.waiting(label):
+                resp = self._session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json_body,
+                    auth=self._auth if auth else None,
+                    timeout=self.timeout,
+                    verify=self.verify_tls,
+                )
         except requests.exceptions.SSLError as exc:
             raise ConnectionFailed(
                 f"TLS error talking to {self.host}: {exc}",

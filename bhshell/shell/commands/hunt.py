@@ -104,7 +104,7 @@ class HuntCommands(BaseCommands):
         if args.owned or args.source:
             checks = self._scoped_checks(checks, bool(args.checks))
             opts.principals = self._scope(service, args)
-        findings = [service.run(check, opts) for check in checks]
+        findings = [service.run(check, opts) for check in app.client.steps(checks)]
 
         if args.json:
             app.poutput(export.to_json([f.as_dict() for f in findings]))

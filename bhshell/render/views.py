@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import itertools
+import threading
+import time
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -28,6 +31,9 @@ if TYPE_CHECKING:
     from bhshell.queries.paths import PathResult
 
 T = TypeVar("T")
+
+# Requests quicker than this never show the spinner, so paging through results does not flicker.
+SPINNER_DELAY = 0.4
 
 _NARROW_FORMATS = ("t0", "owned", "bool", "risk", "depth")
 RISK_STYLE = {"high": "bold red", "medium": "yellow", "info": "cyan", "none": ""}
@@ -97,6 +103,17 @@ def _titled(title: str, backend: str) -> str:
 
 def _more(shown: int, total: int, what: str, flag: str) -> Text:
     return Text(f"showing {shown} of {total} {what}; use {flag} 0 to show all or -o FILE to export", style="yellow")
+
+
+class _Elapsed:
+    """Spinner text that counts the seconds on every refresh."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.started = time.monotonic()
+
+    def __rich__(self) -> Text:
+        return Text(f"{self.label}... {time.monotonic() - self.started:.0f}s", style="dim")
 
 
 class Renderer:
@@ -360,3 +377,29 @@ class Renderer:
 
     def warn(self, message: str) -> None:
         self.status.print(Text.assemble(("[!] ", "bold yellow"), message))
+
+    @contextmanager
+    def waiting(self, label: str) -> Iterator[None]:
+        """Spinner on stderr while a request is in flight; nothing when stderr is not a terminal."""
+        if not self.status.is_terminal:
+            yield
+            return
+        spinner = self.status.status(_Elapsed(label))
+        lock = threading.Lock()
+        done = False
+
+        def show() -> None:
+            with lock:
+                if not done:
+                    spinner.start()
+
+        timer = threading.Timer(SPINNER_DELAY, show)
+        timer.daemon = True
+        timer.start()
+        try:
+            yield
+        finally:
+            timer.cancel()
+            with lock:
+                done = True
+                spinner.stop()

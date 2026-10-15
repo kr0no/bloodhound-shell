@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +17,7 @@ from bhshell.cli import main
 from bhshell.config import CachedSession, Config
 from bhshell.models.entities import Node
 from bhshell.queries.paths import PathResult, PathService
-from bhshell.render import export
+from bhshell.render import export, views
 from bhshell.render.views import Renderer
 from bhshell.shell.app import BHShell
 from tests.conftest import BASE, graph, run
@@ -177,6 +179,21 @@ def test_status_goes_to_stderr_and_names_are_not_markup() -> None:
     ui.nodes([Node(id="1", objectid="X", kind="GPO", name="BAD[/x]GPO@CORP.LOCAL")], "GPOs")
     assert "done" in err.export_text() and "done" not in out.export_text(clear=False)
     assert "BAD[/x]GPO@CORP.LOCAL" in out.export_text()
+
+
+def test_spinner_only_for_slow_requests_on_a_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(views, "SPINNER_DELAY", 0.05)
+    tty, piped = io.StringIO(), io.StringIO()
+    ui = Renderer(status=Console(file=tty, force_terminal=True))
+    with ui.waiting("Running Cypher query"):
+        pass
+    assert tty.getvalue() == ""
+    with ui.waiting("Running Cypher query"):
+        time.sleep(0.3)
+    assert "Running Cypher query..." in tty.getvalue()
+    with Renderer(status=Console(file=piped)).waiting("Running Cypher query"):
+        time.sleep(0.3)
+    assert piped.getvalue() == ""
 
 
 def test_cli_script_path_with_spaces_and_exit_codes(bhshell_home: Path, tmp_path: Path,

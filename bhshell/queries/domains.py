@@ -106,17 +106,16 @@ class DomainService:
             self.notes.append(REST_DOMAINS_NOTE)
             return sorted((self._rest_info(item) for item in listed if _active_directory(item)),
                           key=lambda d: d.name)
-        infos: list[DomainInfo] = []
+        pending: list[tuple[str, str, Node | None, bool | None]] = []
         seen: set[str] = set()
         for item in listed:
             if not _active_directory(item):
                 continue
             sid = item.get("id", "")
             seen.add(sid)
-            infos.append(self._info(item.get("name", sid), sid, nodes.get(sid), item.get("collected")))
-        for sid, node in nodes.items():
-            if sid not in seen:
-                infos.append(self._info(node.name, sid, node, None))
+            pending.append((item.get("name", sid), sid, nodes.get(sid), item.get("collected")))
+        pending += [(node.name, sid, node, None) for sid, node in nodes.items() if sid not in seen]
+        infos = [self._info(*args) for args in self.client.steps(pending)]
         return sorted(infos, key=lambda d: d.name)
 
     def _info(self, name: str, sid: str, node: Node | None, collected: bool | None) -> DomainInfo:
