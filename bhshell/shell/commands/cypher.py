@@ -39,6 +39,18 @@ class CypherArgs:
     json: bool = False
     names_only: bool = False
     output: str | None = None
+    help: bool = False
+
+
+def _word(text: str) -> tuple[str, str]:
+    """The first word of `text` (quotes removed from a quoted one) and what follows it."""
+    if text[:1] in ("'", '"'):
+        end = text.find(text[0], 1)
+        if end < 0:
+            raise BHError(f"Unclosed quote in {text.split(None, 1)[0]}")
+        return text[1:end], text[end + 1:].lstrip()
+    word, *rest = text.split(None, 1)
+    return word, rest[0] if rest else ""
 
 
 def parse_cypher_args(text: str) -> CypherArgs:
@@ -47,16 +59,17 @@ def parse_cypher_args(text: str) -> CypherArgs:
     args = CypherArgs(query="")
     query_file: str | None = None
     while rest.startswith("-"):
-        flag, _, remainder = rest.partition(" ")
-        remainder = remainder.lstrip()
-        if flag == "--json":
+        flag, remainder = _word(rest)
+        if flag in ("-h", "--help"):
+            args.help = True
+        elif flag == "--json":
             args.json = True
         elif flag == "--names-only":
             args.names_only = True
         elif flag in ("-o", "--output", "-f", "--file"):
-            value, _, remainder = remainder.partition(" ")
-            if not value:
+            if not remainder:
                 raise BHError(f"Option {flag} requires a value")
+            value, remainder = _word(remainder)
             if flag in ("-o", "--output"):
                 try:
                     args.output = output_path(value, (".json", ".csv", ".txt"))
@@ -66,10 +79,14 @@ def parse_cypher_args(text: str) -> CypherArgs:
                 query_file = value
         else:
             break
-        rest = remainder.lstrip()
+        rest = remainder
+    if args.help:
+        return args
     if args.json and args.names_only:
         raise BHError("--json and --names-only cannot be combined")
     if query_file:
+        if rest.strip():
+            raise BHError("Give the query with -f or on the command line, not both")
         try:
             rest = Path(query_file).expanduser().read_text(encoding="utf-8")
         except OSError as exc:
@@ -86,12 +103,11 @@ class CypherCommands(BaseCommands):
 
     def do_cypher(self, statement: Statement) -> None:
         """Run a raw Cypher query (see 'help cypher')."""
-        raw = statement.raw.strip()
-        text = raw.split(None, 1)[1] if " " in raw or "\t" in raw else ""
-        if text.strip() in ("-h", "--help") or not text.strip():
+        parts = statement.raw.strip().split(None, 1)
+        args = parse_cypher_args(parts[1] if len(parts) > 1 else "")
+        if args.help or not (args.query or args.output or args.json or args.names_only):
             self.app.poutput(CYPHER_HELP)
             return
-        args = parse_cypher_args(text)
         if not args.query:
             raise BHError("No query given")
         app = self.app

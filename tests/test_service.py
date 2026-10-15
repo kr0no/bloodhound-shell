@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -445,6 +446,17 @@ def test_parse_cypher_args() -> None:
     assert args.query == "MATCH p=(a)-[:A|B]->(b) RETURN p"
     quoted = parse_cypher_args('"MATCH (n) WHERE n.name = \'X\' RETURN n"')
     assert quoted.query == "MATCH (n) WHERE n.name = 'X' RETURN n"
+    spaced = parse_cypher_args("--names-only\t-o 'my out.txt' MATCH (n) RETURN n")
+    assert spaced.names_only and spaced.output == "my out.txt" and spaced.query == "MATCH (n) RETURN n"
+    assert parse_cypher_args("--json -h").help
+
+
+def test_cypher_file_and_inline_query_conflict(tmp_path: Path) -> None:
+    query_file = tmp_path / "my query.cyp"
+    query_file.write_text("MATCH (n) RETURN n\n")
+    assert parse_cypher_args(f"-f '{query_file}'").query == "MATCH (n) RETURN n"
+    with pytest.raises(BHError, match="not both"):
+        parse_cypher_args(f"-f '{query_file}' MATCH (m) RETURN m")
 
 
 def _builtin(oid: str, name: str, domain: str) -> dict[str, Any]:
