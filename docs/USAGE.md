@@ -60,7 +60,7 @@ delegation, password age, last logon, Tier Zero/owned, ...; risky values are hig
 | `-p, --local-admin, --privs` | `AdminTo`, `CanRDP`, `ExecuteDCOM`, `CanPSRemote`, `SQLAdmin`; computers also list who has these rights on them, with group members unrolled as for `-I` |
 | `-G, --gpos` | GPOs that apply to the user or computer, and who outside Tier Zero can edit them (see [Exploring OUs](#exploring-ous)) |
 | `-a, --all` | Summary plus every applicable view (for users and computers this includes `--gpos`) |
-| `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). A per-right count line is always shown |
+| `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). Views with 10 rows or more start with a count per right, which covers every row |
 | `--json` / `-o FILE.json\|.csv` | Raw JSON output / export (never capped by `--max-rows`) |
 | `--names-only` / `-o FILE.txt` | Only the object names, one per line (see [Feeding other tools](#feeding-other-tools)) |
 
@@ -106,7 +106,9 @@ across domains. Every row is included, whatever `--max-rows` says.
 
 Which column a table gives depends on its direction: `-I` lists the principals holding the rights,
 `-O` the objects they are held over, an edge check of `hunt` the principals, and a node check the
-objects themselves.
+objects themselves. With several tables the names of each table follow one another: `-a` lists
+every view's, and `-p` on a computer the computers it has rights on, then the principals with rights
+on it.
 
 ```
 search -t computer enabled -d PHANTOM -o targets.txt     # hosts for netexec
