@@ -255,6 +255,8 @@ def test_twin_rows_pair_admin_and_standard_accounts() -> None:
         "other": node("User", "U5", "JDOE@DEV.CORP.LOCAL", domain=DEV, samaccountname="jdoe"),
         "_bob": node("User", "A4", "_BOB@CORP.LOCAL", admincount=True, samaccountname="_bob"),
         "bob": node("User", "U6", "BOB@CORP.LOCAL", samaccountname="bob"),
+        "anna_adm": node("User", "A5", "ANNA_ADM@CORP.LOCAL", admincount=True, samaccountname="anna_adm"),
+        "ann": node("User", "U7", "ANN@CORP.LOCAL", samaccountname="ann"),
     }
     rows = CHECKS_BY_ID["admin-twins"].rows(g(nodes, []), HuntOptions())
     assert [(r["name"], r["twin"], r["match"], r["twin_exposure"], r["twin_owned"]) for r in rows] == [
@@ -262,6 +264,24 @@ def test_twin_rows_pair_admin_and_standard_accounts() -> None:
         ("ADM_JDOE@CORP.LOCAL", "JDOE@CORP.LOCAL", "account name", "kerberoastable", False),
         ("_BOB@CORP.LOCAL", "BOB@CORP.LOCAL", "account name", "", False)]
     assert "UNWIND [u, n] AS x RETURN x LIMIT" in CHECKS_BY_ID["admin-twins"].query(HuntOptions())
+
+
+def test_broad_rights_leave_coercion_to_relay() -> None:
+    nodes = {"au": node("Group", "CORP.LOCAL-S-1-5-11", "AUTHENTICATED USERS@CORP.LOCAL"),
+             "c": node("Computer", "C", "SRV01.CORP.LOCAL")}
+    rows = CHECKS_BY_ID["broad-rights"].rows(
+        g(nodes, [("au", "CoerceAndRelayNTLMToSMB", "c"), ("au", "AdminTo", "c")]), HuntOptions())
+    assert [r["edge"] for r in rows] == ["AdminTo"]
+
+
+def test_gpo_control_includes_links_on_the_domain() -> None:
+    assert "t:Domain" in CHECKS_BY_ID["gpo-control"].query(HuntOptions())
+
+
+def test_adcs_templates_filter_esc2_and_esc15_on_the_server() -> None:
+    query = CHECKS_BY_ID["adcs-templates"].query(HuntOptions())
+    assert "'2.5.29.37.0' IN coalesce(t.effectiveekus, t.ekus)" in query
+    assert "(t.schemaversion = 1 AND t.enrolleesuppliessubject = true)" in query
 
 
 def test_impersonable_admins_drop_protected_users(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -205,7 +205,8 @@ order within one OU, so a GPO listed as applying may still be filtered out on th
 
 #### Where `ou` fits
 
-* `hunt gpo-control` finds principals outside Tier Zero that can edit a GPO or link one to an OU.
+* `hunt gpo-control` finds principals outside Tier Zero that can edit a GPO or link one to an OU or
+  to the domain.
   `ou NAME -G`, or `computer NAME -G` on a target, shows which of those GPOs reach it, and
   `gpo NAME` shows everything one of them reaches.
 * `ou NAME -I` shows who holds `WriteGPLink` on an OU (they can link a GPO they control to it) or

@@ -21,7 +21,7 @@ from bhshell.errors import ApiError, CypherDisabledError, UnsupportedFeature
 from bhshell.models.entities import BROAD_SIDS, OWNED_LABEL, TIER_ZERO_LABEL, Edge, Graph, Node, last_logon
 from bhshell.models.results import Column
 from bhshell.queries import cypher as Q
-from bhshell.queries.adcs import template_escs
+from bhshell.queries.adcs import ANY_PURPOSE, template_escs
 from bhshell.queries.domains import TRUSTS_QUERY, trusts_from_graph
 from bhshell.queries.edges import (
     ACL_EDGES,
@@ -55,7 +55,8 @@ DCSYNC_EDGES = ("DCSync", "GetChanges", "GetChangesAll")
 ERODC_RID = "-498"
 ESC8_EDGE = "CoerceAndRelayNTLMToADCS"
 ADCS_ABUSE_EDGES = frozenset(k for k in ADCS_EDGES if k.startswith("ADCSESC")) | {"GoldenCert", ESC8_EDGE}
-BROAD_RIGHT_EDGES = (CONTROL_EDGES | EXEC_EDGES) - {"Enroll"}
+# Coercion edges always start at Authenticated Users: they are reported by `relay` and `adcs` (ESC8).
+BROAD_RIGHT_EDGES = (CONTROL_EDGES | EXEC_EDGES) - {"Enroll"} - COERCION_EDGES
 CRED_READ_EDGES = frozenset({"ReadLAPSPassword", "ReadGMSAPassword", "SyncLAPSPassword", "DumpSMSAPassword"})
 # Control of a Tier Zero object, other than the DCSync, SID history and AD CS edges reported by their own checks.
 T0_CONTROL_EDGES = ACL_EDGES | DELEGATION_EDGES | CRED_READ_EDGES | EXEC_EDGES
@@ -484,7 +485,8 @@ def twin_match(admin: Node, user: Node) -> str:
     a, s = admin.samaccountname.lower(), user.samaccountname.lower()
     if len(s) >= 3 and a != s and (a.startswith(s) or a.endswith(s)):
         marker = (a[len(s):] if a.startswith(s) else a[:-len(s)]).strip(TWIN_SEPARATORS)
-        if not marker or marker in TWIN_MARKERS or "adm" in marker:
+        # One marker word only: anna_adm is not ann's admin account.
+        if not marker or marker in TWIN_MARKERS or ("adm" in marker and not set(marker) & set(TWIN_SEPARATORS)):
             return "account name"
     admin_name = str(admin.properties.get("displayname") or "")
     user_name = str(user.properties.get("displayname") or "")
@@ -557,9 +559,16 @@ def _foreign_rows(g: Graph, _: HuntOptions) -> list[Row]:
 
 # AD CS
 
+# The settings `template_escs` reads for ESC2 and ESC15, checked on the server so the LIMIT only cuts real findings.
+_TEMPLATE_EKUS = "coalesce(t.effectiveekus, t.ekus)"
+_TEMPLATE_ONLY_ESC = ("t.requiresmanagerapproval = false", "(t.schemaversion = 1 OR t.authorizedsignatures = 0)",
+                      (f"((t.schemaversion = 1 AND t.enrolleesuppliessubject = true) OR size({_TEMPLATE_EKUS}) = 0 "
+                       f"OR {Q.lit(ANY_PURPOSE)} IN {_TEMPLATE_EKUS})"))
+
+
 def _templates(o: HuntOptions) -> str:
     return (f"MATCH p=(n:Base)-[:{Q.edge_types(ENROLL_EDGES)}]->(t:CertTemplate)-[:{PUBLISHED_TO}]->(ca:EnterpriseCA)"
-            f"{Q.where(_NOT_T0, 't.requiresmanagerapproval = false', o.scope('n'), o.dom('t'))} "
+            f"{Q.where(_NOT_T0, *_TEMPLATE_ONLY_ESC, o.scope('n'), o.dom('t'))} "
             f"RETURN p LIMIT {o.limit}")
 
 
@@ -697,11 +706,11 @@ CHECKS: tuple[Check, ...] = (
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, Column("Technique", "technique"), TARGET, TARGET_KIND,
            Column("Target adminCount", "admincount", "bool")), _takeover_rows, scoped=True),
     Check("gpo-control", "GPO and OU link control", "high",
-          "Principals outside Tier Zero that can edit a GPO or link GPOs to an OU (code execution on every "
+          "Principals outside Tier Zero that can edit a GPO or link GPOs to an OU or the domain (code execution on every "
           "computer below it). 'gpo NAME' shows what a GPO applies to.",
-          _edge_check(GPO_CONTROL_EDGES, _NOT_T0, "(t:GPO OR t:OU)"),
+          _edge_check(GPO_CONTROL_EDGES, _NOT_T0, "(t:GPO OR t:OU OR t:Domain)"),
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, TARGET_KIND, T0), _edge_rows(GPO_CONTROL_EDGES),
-          fallback=_edge_check(None, _NOT_T0, "(t:GPO OR t:OU)"), scoped=True),
+          fallback=_edge_check(None, _NOT_T0, "(t:GPO OR t:OU OR t:Domain)"), scoped=True),
     Check("relay", "NTLM coercion and relay", "high",
           "CoerceAndRelayNTLMTo SMB / LDAP / LDAPS edges (relay to AD CS is in 'adcs').",
           _edge_check(RELAY_EDGES, dom="t"), (PRINCIPAL, EDGE, TARGET, TARGET_KIND, T0), _edge_rows(RELAY_EDGES)),
