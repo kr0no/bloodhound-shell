@@ -81,6 +81,16 @@ class MarkingService:
         return [s for s in self.client.paginate(base)
                 if node.objectid in [seed.get("value") for seed in s.get("seeds") or []]]
 
+    def _selected_by(self, tag_obj: dict[str, Any], node: Node) -> list[Any] | None:
+        """IDs of the selectors that put `node` in the tag at the last analysis (`None` if unknown)."""
+        if not node.id.isdigit():  # not a graph ID (REST lookup)
+            return None
+        try:
+            resp = self.client.get(f"api/v2/asset-group-tags/{tag_obj['id']}/members/{node.id}")
+        except (NotFoundError, ApiError):
+            return None
+        return _member_selectors(resp)
+
     def _remove(self, node: Node, tag_obj: dict[str, Any]) -> str:
         """Delete the selectors seeded with this object alone.
 
@@ -102,19 +112,29 @@ class MarkingService:
                               f"{', '.join(shared)}",
                               hint="Edit those selectors in the BH UI to unmark just this object.")
             if _tagged(node, tag_obj):
-                rules = [s for s in self.client.paginate(base)
-                         if any(seed.get("type") != _SEED_OBJECT_ID for seed in s.get("seeds") or [])]
+                current = {s.get("id"): s for s in self.client.paginate(base)}
+                selected_by = self._selected_by(tag_obj, node)
+                if selected_by is None:  # no member endpoint: any rule-based selector may be the one
+                    rules = [_selector_name(s) for s in current.values()
+                             if any(seed.get("type") != _SEED_OBJECT_ID for seed in s.get("seeds") or [])]
+                else:  # as of the last analysis; a selector deleted since then no longer counts
+                    rules = [_selector_name(current[i]) for i in selected_by if i in current]
                 if not rules:  # its own selector is gone: the tag stays until the next analysis
                     return (f"No selector in '{tag_name}' targets {node.name} any more; it stays tagged until "
                             "BloodHound's next analysis.")
-                raise BHError(f"{node.name} is in '{tag_name}' through a rule-based selector ({len(rules)} in the "
-                              "tag), not one naming it",
+                raise BHError(f"{node.name} is in '{tag_name}' through a rule-based selector, not one naming it: "
+                              f"{', '.join(rules)}",
                               hint="Change that selector in the BH UI (Privilege Zones) to unmark it.")
             raise NotFoundError(f"No selector in '{tag_name}' targets {node.name}")
         message = f"Removed {removed} selector(s) for {node.name} from '{tag_name}'."
         if shared:
             message += f" Left alone, as they also cover other objects: {', '.join(shared)}."
         return message
+
+
+def _member_selectors(resp: dict[str, Any] | None) -> list[Any]:
+    member = ((resp or {}).get("data") or {}).get("member") or {}
+    return [s.get("id") for s in member.get("selectors") or []]
 
 
 def _selector_name(selector: dict[str, Any]) -> str:

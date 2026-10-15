@@ -430,8 +430,13 @@ def test_hvt_add_and_remove_respect_rule_based_tier_zero(client: BHClient, mocke
     node.tier_zero = True  # selected by a rule (e.g. a group membership), not by a selector naming it
     assert "already in 'Tier Zero'" in _mark(marking, node, "tier0")
     assert post.call_count == 0
-    with pytest.raises(BHError, match=r"rule-based selector \(1 in the tag\)"):
+    member = mocked.add(responses.GET, f"{BASE}api/v2/asset-group-tags/1/members/{node.id}",
+                        json={"data": {"member": {"selectors": [{"id": 1}]}}})
+    with pytest.raises(BHError, match="rule-based selector, not one naming it: Domain Admins members"):
         _mark(marking, node, "tier0", add=False)
+    # Its own selector, deleted by a first 'remove': the rules in the tag do not select it.
+    mocked.replace(responses.GET, member.url, json={"data": {"member": {"selectors": [{"id": 7}]}}})
+    assert "next analysis" in _mark(marking, node, "tier0", add=False)
 
 
 def test_owned_remove_after_its_selector_is_gone_waits_for_analysis(client: BHClient,
@@ -442,6 +447,8 @@ def test_owned_remove_after_its_selector_is_gone_waits_for_analysis(client: BHCl
     svc = EntityService(client)
     node = svc.resolve("svc_sql", "User")
     node.owned = True  # the tag lasts until the next analysis
+    mocked.add(responses.GET, f"{BASE}api/v2/asset-group-tags/2/members/{node.id}", status=404,
+               json={"errors": [{"message": "not found"}]})
     message = _mark(MarkingService(client, svc), node, "owned", add=False)
     assert "next analysis" in message
 
