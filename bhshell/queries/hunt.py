@@ -622,9 +622,9 @@ CHECKS: tuple[Check, ...] = (
           _broad, (PRINCIPAL, EDGE, TARGET, TARGET_KIND, T0), _broad_rows,
           fallback=lambda o: _broad(o, None), scoped=True),
     Check("adcs", "AD CS escalation paths (ESC*, GoldenCert)", "critical",
-          "Principals with a certificate-services escalation edge, including NTLM relay to web enrollment (ESC8). "
-          "'ca NAME' and 'template NAME' show the CA and template behind a finding.",
-          _edge_check(ADCS_ABUSE_EDGES), (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, T0),
+          "Principals outside Tier Zero with a certificate-services escalation edge, including NTLM relay to web "
+          "enrollment (ESC8). 'ca NAME' and 'template NAME' show the CA and template behind a finding.",
+          _edge_check(ADCS_ABUSE_EDGES, _NOT_T0), (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED),
           _edge_rows(ADCS_ABUSE_EDGES), scoped=True),
     Check("adcs-templates", "Certificate templates open to ESC2 / ESC15", "high",
           "Published templates that principals outside Tier Zero can enroll in, issued without approval, with "

@@ -50,6 +50,10 @@ def test_scoped_checks_restrict_their_principals() -> None:
     assert "objectid IN" not in CHECKS_BY_ID["kerberoastable"].query(HuntOptions())
 
 
+def test_adcs_leaves_out_tier_zero_principals() -> None:
+    assert "NOT n:Tag_Tier_Zero" in CHECKS_BY_ID["adcs"].query(HuntOptions())
+
+
 def test_every_check_has_a_unique_id_and_builds_a_query() -> None:
     assert len(CHECKS_BY_ID) == len(CHECKS)
     for check in CHECKS:

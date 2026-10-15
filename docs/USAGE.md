@@ -418,7 +418,7 @@ a matching DPI so Word inserts it at the same size as the SVG.
 
 | Severity | Checks |
 |---|---|
-| critical | `dcsync` (replication rights outside Tier Zero), `tier-zero-control` (ACL, delegation, credential-read or execution rights on Tier Zero objects from outside it), `broad-rights` (Everyone / Anonymous / Authenticated Users / Domain Users / Domain Computers / Users / Pre-Windows 2000 Compatible Access with control or execution rights), `adcs` (ESC*, ESC8 relay, GoldenCert) |
+| critical | `dcsync` (replication rights outside Tier Zero), `tier-zero-control` (ACL, delegation, credential-read or execution rights on Tier Zero objects from outside it), `broad-rights` (Everyone / Anonymous / Authenticated Users / Domain Users / Domain Computers / Users / Pre-Windows 2000 Compatible Access with control or execution rights), `adcs` (ESC*, ESC8 relay, GoldenCert from outside Tier Zero) |
 | high | `adcs-ca-control` (ESC7), `adcs-templates` (ESC2, ESC15), `adcs-pki-control` (ESC4, ESC5), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `pre2k` (computers that may keep a default password), `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD, ESC14), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
 | medium | `constrained` (with protocol transition), `reenable`, `impersonable-admins`, `ntlm-hardening`, `stale-passwords` (`--days`, default 5 years), `pwd-not-required`, `default-passwords`, `admin-twins`, `legacy-os` |
 | low | `admincount-orphans`, `no-laps` |
