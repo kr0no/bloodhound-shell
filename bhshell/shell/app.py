@@ -145,6 +145,8 @@ class BHShell(cmd2.Cmd):
             self.ui.info("Cached session is no longer valid; run 'login'.")
         except ConnectionFailed:
             self.ui.warn(f"Backend {self.client.base_url} unreachable; keeping cached session for {cached.username}.")
+        except BHError as exc:  # 5xx, 403, a proxy's 404: the token may still be good
+            self.ui.warn(f"Could not check the cached session ({exc}); keeping it for {cached.username}.")
         else:
             self.ui.success(f"Resumed session for {cached.username or 'user'} on {self.client.host}")
 
@@ -162,8 +164,10 @@ class BHShell(cmd2.Cmd):
     def onecmd(self, statement: Statement | str, *, add_to_history: bool = True) -> bool:
         try:
             return super().onecmd(statement, add_to_history=add_to_history)
-        except Cmd2ArgparseError:  # usage error: argparse already printed it
-            self.command_failures += 1
+        except Cmd2ArgparseError as exc:  # usage error or --help: argparse already printed it
+            help_exit = isinstance(exc.__cause__, SystemExit) and exc.__cause__.code in (0, None)
+            if not help_exit:
+                self.command_failures += 1
             raise
 
     def perror(self, *objects: Any, **kwargs: Any) -> None:

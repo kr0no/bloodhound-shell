@@ -50,6 +50,13 @@ def test_session_is_resumed(shell: BHShell) -> None:
     assert connected(resumed)
 
 
+def test_resume_survives_a_server_error(shell: BHShell, mocked: Any) -> None:
+    run(shell, "login -u admin")
+    mocked.replace(responses.GET, f"{BASE}api/v2/self", status=502, body="Bad Gateway")
+    resumed = BHShell(Config(url=BASE))
+    assert resumed.client.is_authenticated
+
+
 def test_user_requires_login(shell: BHShell) -> None:
     assert "Not authenticated" in run(shell, "user jdoe")
 
@@ -264,6 +271,8 @@ def test_cli_script_path_with_spaces_and_exit_codes(bhshell_home: Path, tmp_path
     script.write_text("url\n")
     assert main(["-s", str(script)]) == 0
     assert main(["-c", "no_such_command"]) == 1
+    assert main(["-c", "ou --help"]) == 0
+    assert main(["-c", "ou --no-such-flag"]) == 1
     assert main(["-c", "user jdoe"]) == 1  # not authenticated
     out = capsys.readouterr()
     assert "Not authenticated" in out.err and "Not authenticated" not in out.out
