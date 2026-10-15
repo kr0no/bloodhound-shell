@@ -251,20 +251,19 @@ def contained_counts(objectid: str, *, nested: bool) -> str:
     `nested=False` covers the object's own children, `nested=True` those of every container below it.
     """
     if nested:
-        match, anchor = f"(o:Base)-[:{CONTAINS}*1..]->(c:Base)-[:{CONTAINS}]->(n:Base)", "o"
+        # DISTINCT: a container reached twice (moved, so under its old and new parent) is counted once.
+        match = (f"(o:Base)-[:{CONTAINS}*1..]->(c:Base) WHERE o.objectid = {lit(objectid)} "
+                 f"WITH DISTINCT c MATCH (c)-[:{CONTAINS}]->(n:Base)")
     else:
-        match, anchor = f"(c:Base)-[:{CONTAINS}]->(n:Base)", "c"
-    return (
-        f"MATCH {match} WHERE {anchor}.objectid = {lit(objectid)} "
-        f"RETURN c.objectid AS parent, labels(n) AS kinds, n.enabled AS enabled, count(n) AS total"
-    )
+        match = f"(c:Base)-[:{CONTAINS}]->(n:Base) WHERE c.objectid = {lit(objectid)}"
+    return f"MATCH {match} RETURN c.objectid AS parent, labels(n) AS kinds, n.enabled AS enabled, count(n) AS total"
 
 
 def gp_link_counts(objectid: str) -> str:
     """Scalar rows `parent, total`: the number of GPO links on each container below the object."""
     return (
-        f"MATCH (o:Base)-[:{CONTAINS}*1..]->(c:Base)<-[r:{GP_LINK}]-(g:GPO) "
-        f"WHERE o.objectid = {lit(objectid)} RETURN c.objectid AS parent, count(g) AS total"
+        f"MATCH (o:Base)-[:{CONTAINS}*1..]->(c:Base) WHERE o.objectid = {lit(objectid)} "
+        f"WITH DISTINCT c MATCH (c)<-[r:{GP_LINK}]-(g:GPO) RETURN c.objectid AS parent, count(g) AS total"
     )
 
 

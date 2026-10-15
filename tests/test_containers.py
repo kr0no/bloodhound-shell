@@ -452,3 +452,9 @@ def test_summary_counts_other_objects_only_when_there_are_some() -> None:
     users = Counts()
     users.add(["Base", "User"], True, 2)
     assert "Other objects below" not in {f.label for f in users.summary()}
+
+
+def test_nested_counts_visit_each_container_once() -> None:
+    # A moved OU keeps both Contains edges: two paths reach it, and its children must not count twice.
+    for query in (Q.contained_counts(DOM, nested=True), Q.gp_link_counts(DOM)):
+        assert "WITH DISTINCT c MATCH (c)" in query
