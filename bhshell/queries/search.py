@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from bhshell.errors import BHError, CypherDisabledError, UnsupportedFeature
-from bhshell.models.entities import Graph, Node
+from bhshell.models.entities import OWNED_LABEL, TIER_ZERO_LABEL, Graph, Node
 from bhshell.models.results import Column
 from bhshell.queries import cypher as Q
 from bhshell.queries.service import EntityService
@@ -33,15 +33,25 @@ _NUMBER_RE = re.compile(r"^-?\d+(\.\d+)?$")
 
 # Properties BloodHound stores as epoch seconds.
 DATE_PROPS = frozenset({"pwdlastset", "lastlogon", "lastlogontimestamp", "whencreated", "lastseen", "lastcollected"})
+# Properties BloodHound stores as lists of strings: text filters match any item.
+LIST_PROPS = frozenset({
+    "serviceprincipalnames", "allowedtodelegate", "sidhistory", "effectiveekus", "ekus", "applicationpolicies",
+    "issuancepolicies", "certificateapplicationpolicy", "certificatemappingmethods", "certchain", "certthumbprints",
+    "crosscertificatepair", "supportedencryptiontypes",
+})
+# Other numeric properties, which text filters compare as text.
+NUMBER_PROPS = frozenset({"admincount", "authorizedsignatures", "schemaversion", "basicconstraintpathlength"})
+# Pseudo-attributes for BloodHound's tags (the objects carry a label, not a property).
+TAGS = {"owned": OWNED_LABEL, "tier_zero": TIER_ZERO_LABEL}
 # Common properties, offered for tab completion.
 COMMON_PROPS = (
     "name", "samaccountname", "displayname", "description", "email", "domain", "objectid", "distinguishedname",
     "enabled", "admincount", "hasspn", "dontreqpreauth", "passwordnotreqd", "pwdneverexpires",
     "unconstraineddelegation", "trustedtoauth", "sensitive", "pwdlastset", "lastlogon", "lastlogontimestamp",
-    "whencreated", "operatingsystem", "haslaps", "isdc", "title", "homedirectory", "userpassword",
+    "whencreated", "operatingsystem", "haslaps", "isdc", "title", "homedirectory", "userpassword", *TAGS,
 )
 # Attributes already shown by the base columns.
-_BASE_ATTRS = frozenset({"name", "kind", "domain", "objectid", "enabled"})
+_BASE_ATTRS = frozenset({"name", "kind", "domain", "objectid", "enabled", *TAGS})
 
 
 @dataclass(frozen=True)
@@ -81,22 +91,36 @@ def parse_filter(text: str, now: float | None = None) -> Filter:
         return Filter(attr, "!=" if m.group("neg") else "=", True)
     if m.group("neg"):
         raise BHError(f"Invalid filter '{text}': '!' only negates a bare attribute (!{attr})")
+    if op in ("~", "!~"):
+        if attr in DATE_PROPS:
+            raise BHError(f"Invalid filter '{text}': '{op}' does not work on dates; use < > <= >= with a date or "
+                          "an age (90d), or = with a date")
+        return Filter(attr, op, m.group("value"))
     value = _parse_value(m.group("value"), op, time.time() if now is None else now)
+    if attr in TAGS and not isinstance(value, bool):
+        raise BHError(f"Invalid filter '{text}': {attr} is a tag; use {attr} or !{attr}")
     if value is None and op not in ("=", "!="):
         raise BHError(f"Invalid filter '{text}': null only works with = and !=")
     if isinstance(value, bool) and op not in ("=", "!="):
         raise BHError(f"Invalid filter '{text}': true/false only work with = and !=")
-    if op in ("~", "!~") and not isinstance(value, str):
-        value = str(m.group("value"))
     return Filter(attr, op, value)
 
 
-def _glob(prop: str, pattern: str) -> str:
-    """Case-insensitive match of a string property against `pattern` (`*` at either end only)."""
+def _text(attr: str, prop: str, match: Callable[[str], str]) -> str:
+    """`match` applied to the lower-cased text of `prop`: of any of its items for a list."""
+    if attr in LIST_PROPS:
+        return f"any(x IN {prop} WHERE {match('toLower(x)')})"
+    if attr in NUMBER_PROPS:
+        return match(f"toLower(toString({prop}))")
+    return match(f"toLower({prop})")
+
+
+def _glob(lowered: str, pattern: str) -> str:
+    """Case-insensitive match of the lower-cased `lowered` against `pattern` (`*` at either end only)."""
     body = pattern.strip("*")
     if "*" in body:
         raise BHError(f"'*' is only supported at the start or end of a value ('{pattern}'); use 'cypher'")
-    lowered, value = f"toLower({prop})", Q.lit(body.lower())
+    value = Q.lit(body.lower())
     starts, ends = pattern.startswith("*"), pattern.endswith("*") and len(pattern) > 1
     if starts and ends:
         return f"{lowered} CONTAINS {value}"
@@ -114,6 +138,9 @@ def condition(f: Filter, alias: str = "n") -> str:
         # Unset differs from any value and contains no text: '!=' and '!~' keep those objects.
         return f"({prop} IS NULL OR {cond})"
 
+    if f.attr in TAGS:
+        has = f"{alias}:{TAGS[f.attr]}"
+        return has if (f.op == "=") == f.value else f"NOT {has}"
     if f.value is None:
         return f"{prop} IS {'NOT ' if f.op == '!=' else ''}NULL"
     if isinstance(f.value, bool):
@@ -122,7 +149,7 @@ def condition(f: Filter, alias: str = "n") -> str:
         # Missing counts as "not this value": '!enabled' also finds objects without the property.
         return f"({prop} = {str(not f.value).lower()} OR {prop} IS NULL)"
     if f.op in ("~", "!~"):
-        cond = f"toLower({prop}) CONTAINS {Q.lit(str(f.value).lower())}"
+        cond = _text(f.attr, prop, lambda text: f"{text} CONTAINS {Q.lit(str(f.value).lower())}")
         return cond if f.op == "~" else unless_unset(f"NOT ({cond})")
     if isinstance(f.value, (int, float)):
         if f.op == "=":  # numeric-looking strings ('samaccountname=1234') are stored as text
@@ -130,7 +157,11 @@ def condition(f: Filter, alias: str = "n") -> str:
         if f.op == "!=":
             return unless_unset(f"({prop} <> {f.value} AND {prop} <> {Q.lit(str(f.value))})")
         return f"{prop} {f.op} {f.value}"
-    cond = _glob(prop, f.value)
+    if f.attr in DATE_PROPS and _DATE_RE.match(str(f.value)):  # that whole day (UTC)
+        day = _parse_value(str(f.value), ">=", 0)
+        cond = f"{prop} >= {day} AND {prop} < {day + 86400}"
+        return f"({cond})" if f.op == "=" else unless_unset(f"NOT ({cond})")
+    cond = _text(f.attr, prop, lambda text: _glob(text, str(f.value)))
     return cond if f.op == "=" else unless_unset(f"NOT ({cond})")
 
 

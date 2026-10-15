@@ -87,8 +87,10 @@ search name=sm_* !enabled                              # any type, disabled SM_ 
 | `ATTR~TEXT`, `ATTR!~TEXT` | contains / doesn't contain or unset |
 | `ATTR<VALUE`, `>`, `<=`, `>=` | numbers, dates (`2020-01-01`) or ages (`90d` = 90 days ago) |
 
-Text comparisons ignore case, and `*` at the start or end of a value is a wildcard. Quote filters
-that contain spaces. `-t` takes any BloodHound type (`User`, `Computer`, `Group`, `OU`,
+Text comparisons ignore case, and `*` at the start or end of a value is a wildcard. A list
+property (`serviceprincipalnames`, `allowedtodelegate`, `effectiveekus`, ...) matches when any item
+does. `pwdlastset=2023-04-12` matches that whole day (UTC); `owned` and `tier_zero` (or `!owned`,
+`!tier_zero`) filter on BloodHound's Owned and Tier Zero tags. Quote filters that contain spaces. `-t` takes any BloodHound type (`User`, `Computer`, `Group`, `OU`,
 `GPO`, `CertTemplate`, ...; default: any), `-c ATTR,...` adds columns, `-l N` caps the results
 fetched (default `max_results`, with a note when there are more) and `-n` the rows shown.
 `--json` prints every property of each match. For OR conditions or relationships, use `cypher`.

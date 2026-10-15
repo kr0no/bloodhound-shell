@@ -36,6 +36,7 @@ def test_parse_filter(text: str, expected: Filter) -> None:
 
 @pytest.mark.parametrize("text", [
     "bad-attr=1", "n.name=x", "x) OR (1=1", "!name=x", "name>abc", "enabled>true", "email<null", "",
+    "pwdlastset~2023", "owned=1",
 ])
 def test_parse_filter_rejects(text: str) -> None:
     with pytest.raises(BHError):
@@ -57,6 +58,13 @@ def test_parse_filter_rejects(text: str) -> None:
     ("admincount!=1", "(n.admincount IS NULL OR (n.admincount <> 1 AND n.admincount <> '1'))"),
     ("samaccountname=1234", "(n.samaccountname = 1234 OR n.samaccountname = '1234')"),
     ("pwdlastset<2020-01-01", "n.pwdlastset < 1577836800"),
+    ("pwdlastset=2020-01-01", "(n.pwdlastset >= 1577836800 AND n.pwdlastset < 1577923200)"),
+    ("description~true", "toLower(n.description) CONTAINS 'true'"),
+    ("serviceprincipalnames~MSSQL", "any(x IN n.serviceprincipalnames WHERE toLower(x) CONTAINS 'mssql')"),
+    ("effectiveekus=*3.2", "any(x IN n.effectiveekus WHERE toLower(x) ENDS WITH '3.2')"),
+    ("schemaversion~1", "toLower(toString(n.schemaversion)) CONTAINS '1'"),
+    ("owned", "n:Tag_Owned"),
+    ("!tier_zero", "NOT n:Tag_Tier_Zero"),
 ])
 def test_condition(text: str, cypher: str) -> None:
     assert condition(parse_filter(text, NOW)) == cypher
@@ -103,6 +111,9 @@ def test_search_command(shell: BHShell, mocked: Any, tmp_path: Path) -> None:
     assert queries[-1].startswith("MATCH (n:User) WHERE n.lastlogon >= ")
     assert queries[-1].endswith(f"AND toLower(n.description) CONTAINS 'a|b' AND n.enabled = true "
                                 f"RETURN n LIMIT {shell.config.max_results}")
+    run(shell, r"search homedirectory~\\srv\home$ 'description~a b' lastlogon>=90d")
+    assert r"toLower(n.homedirectory) CONTAINS '\\\\srv\\home$'" in queries[-1]
+    assert "toLower(n.description) CONTAINS 'a b'" in queries[-1]
 
     data = json.loads(shell_json(shell, "search hasspn --json"))
     assert data["count"] == 2 and data["results"][0]["properties"]["samaccountname"] == "jdoe"
@@ -139,3 +150,7 @@ def test_unknown_domain_is_reported(shell: BHShell, mocked: Any) -> None:
     assert "No domain matches 'corpp' (known: CORP.LOCAL)" in run(shell, "search -t user -d corpp")
     assert "No domain matches" not in run(shell, "search -t user -d corp")
     assert "No domain matches" not in run(shell, "search -t user -d corp.local")
+
+
+def test_tag_columns_keep_the_real_flags() -> None:
+    assert SearchOptions([parse_filter("owned")]).extra_attrs(["tier_zero", "owned", "title"]) == ["title"]

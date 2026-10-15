@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import shlex
 
 from cmd2 import (
     Choices,
@@ -12,6 +11,8 @@ from cmd2 import (
     RawDescriptionCmd2HelpFormatter,
     with_argparser,
 )
+from cmd2.parsing import shlex_split
+from cmd2.string_utils import strip_quotes
 
 from bhshell.errors import BHError
 from bhshell.models.entities import PRIMARY_KINDS
@@ -51,7 +52,9 @@ def _search_parser() -> Cmd2ArgumentParser:
                "  ATTR<VALUE  > <= >=  compare         pwdlastset<2020-01-01  lastlogontimestamp<90d\n\n"
                "Text matching ignores case; '*' at either end of a value is a wildcard (name=svc_*).\n"
                "VALUE can be true/false, null (unset), a number, a date (YYYY-MM-DD) or an age (90d =\n"
-               "90 days ago). Quote filters containing spaces: 'description~service account'.\n\n"
+               "90 days ago); ATTR=DATE matches that whole day. List properties (serviceprincipalnames)\n"
+               "match when any item does. 'owned' and 'tier_zero' filter on BloodHound's tags.\n"
+               "Quote filters containing spaces: 'description~service account'.\n\n"
                "Examples:\n"
                "  search -t user hasspn enabled\n"
                "  search -t computer operatingsystem~2012 -d CORP\n"
@@ -83,7 +86,9 @@ def _uncut(args: argparse.Namespace) -> argparse.Namespace:
     if not (stmt.redirector or stmt.terminator):
         return args
     try:
-        return _search_parser().parse_args(shlex.split(stmt.raw.split(None, 1)[1]))
+        # Split as cmd2 does, so backslashes (\\srv\share) survive as they do without '>'.
+        tokens = [strip_quotes(t) for t in shlex_split(stmt.raw.split(None, 1)[1])]
+        return _search_parser().parse_args(tokens)
     except ValueError as exc:
         raise BHError(f"Cannot parse arguments: {exc}") from exc
     except SystemExit as exc:  # usage error: argparse already printed it
