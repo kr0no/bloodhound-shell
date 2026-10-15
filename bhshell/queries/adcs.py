@@ -71,6 +71,15 @@ def issued_freely(props: dict[str, Any]) -> bool:
     return _int(props.get("schemaversion")) == 1 or _int(props.get("authorizedsignatures")) == 0
 
 
+def can_authenticate(props: dict[str, Any]) -> bool | None:
+    """Whether the template's certificates can log on (`None` when not collected)."""
+    auth = opt_bool(props, "authenticationenabled")
+    ekus = effective_ekus(props)
+    if auth is None and ekus is not None:
+        auth = not ekus or bool(AUTH_EKUS & set(ekus))
+    return auth
+
+
 def template_escs(props: dict[str, Any]) -> list[str]:
     """The ESC techniques whose template conditions are met (ESC4 and ESC13 need edges: not checked here).
 
@@ -80,9 +89,7 @@ def template_escs(props: dict[str, Any]) -> list[str]:
         return []
     schema = _int(props.get("schemaversion"))
     ekus = effective_ekus(props)
-    auth = opt_bool(props, "authenticationenabled")
-    if auth is None and ekus is not None:
-        auth = not ekus or bool(AUTH_EKUS & set(ekus))
+    auth = can_authenticate(props)
     supplies = props.get("enrolleesuppliessubject") is True
     found = []
     if auth and supplies:
@@ -147,7 +154,8 @@ class ADCSService:
             found = [(esc, ESC_LABELS[esc]) for esc in template_escs(t.properties)]
             if t.objectid in writers:
                 found.append(("ESC4", ESC_LABELS["ESC4"]))
-            if t.objectid in groups and issued_freely(t.properties):
+            # The group's rights come with a logon as the certificate's subject.
+            if t.objectid in groups and issued_freely(t.properties) and can_authenticate(t.properties):
                 found.append(("ESC13", f"ESC13: issuance policy linked to {', '.join(groups[t.objectid])}"))
             out[t.objectid] = sorted(found, key=lambda f: int(f[0][3:]))
         return out

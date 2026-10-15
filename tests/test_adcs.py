@@ -162,6 +162,14 @@ def test_esc13_needs_a_freely_issued_template(svc: EntityService, monkeypatch: p
     assert {r.name: r.escs for r in view.rows}["POLICY@CORP.LOCAL"] == []
 
 
+def test_esc13_needs_a_logon_certificate(svc: EntityService, monkeypatch: pytest.MonkeyPatch) -> None:
+    props = NODES["policyt"]["properties"]
+    monkeypatch.setitem(props, "authenticationenabled", False)
+    monkeypatch.setitem(props, "effectiveekus", ["1.3.6.1.5.5.7.3.3"])  # Code Signing
+    view = svc.view(svc.resolve("CORP-CA", kinds=("EnterpriseCA",)), "templates")[0]
+    assert {r.name: r.escs for r in view.rows}["POLICY@CORP.LOCAL"] == []
+
+
 def test_same_named_templates_point_to_the_domain_or_guid(svc: EntityService,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     dev = template("40000001-0000-0000-0000-000000000000", "VULNUSER@DEV.CORP.LOCAL", domain="DEV.CORP.LOCAL")

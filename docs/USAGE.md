@@ -306,7 +306,7 @@ without a manager's approval or an authorized signature (schema version 1 ignore
 | ESC3 | Certificate Request Agent EKU: an enrollment agent template |
 | ESC4 | Someone outside Tier Zero can rewrite it (`GenericAll`, `GenericWrite`, `WriteDacl`, `WriteOwner`, `Owns`, `WritePKIEnrollmentFlag`, `WritePKINameFlag`) |
 | ESC9 | Logon certificate without the security extension (`CT_FLAG_NO_SECURITY_EXTENSION`) |
-| ESC13 | One of its issuance policies is linked to a group (`OIDGroupLink`) |
+| ESC13 | Logon certificate and one of its issuance policies is linked to a group (`OIDGroupLink`) |
 | ESC15 | Schema version 1 and the enrollee supplies the subject (CVE-2024-49019, fixed by the November 2024 update) |
 
 A setting that was not collected never counts. A condition met is not an attack yet: the principal
