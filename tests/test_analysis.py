@@ -304,6 +304,22 @@ def test_path_actions_count_ignores_passive_hops(client: BHClient) -> None:
     assert path.as_dict()["actions"] == 1
 
 
+def test_owned_tier_zero_objects_are_noted(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    da = {"3": {"kind": "Group", "kinds": ["Base", "Group", "Tag_Tier_Zero", "Tag_Owned"], "objectId": DOMAIN_ADMINS,
+                "isTierZero": True, "isOwnedObject": True,
+                "properties": {"name": "DOMAIN ADMINS@CORP.LOCAL", "objectid": DOMAIN_ADMINS}}}
+
+    def answer(query: str) -> Graph:
+        # The path search stops at Tier Zero, so it never starts at the owned Domain Admins.
+        return Graph.from_cypher(graph(["3"], [], nodes=da)["data"]) if "WHERE n:Tag_Tier_Zero" in query else Graph()
+
+    monkeypatch.setattr(svc, "run_cypher", answer)
+    result = PathService(svc).owned_to_tier_zero()
+    assert result.notes == ["Owned objects that are already Tier Zero: DOMAIN ADMINS@CORP.LOCAL",
+                            "No other owned object has a path to Tier Zero."]
+
+
 def test_path_rank_prefers_fewer_actions() -> None:
     from bhshell.models.entities import Node
     from bhshell.queries.paths import AttackPath, Hop, _rank

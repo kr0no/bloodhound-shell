@@ -217,12 +217,14 @@ class PathService:
     def owned_to_tier_zero(self) -> PathResult:
         result = PathResult("Shortest paths: owned objects → Tier Zero")
         graph = self._shortest_to_tier_zero(f"(s:{OWNED_LABEL})", "", result)
-        owned = [n for n in graph.nodes.values() if n.owned]
-        if not owned:
-            result.notes.append("No owned object has a path to Tier Zero (or nothing is marked owned).")
-        already = sorted(n.name for n in owned if n.tier_zero)
+        # Paths stop at the first Tier Zero object, so owned Tier Zero objects never start one: ask for them.
+        tier_zero = self._cypher(f"MATCH (n:{OWNED_LABEL}) WHERE n:{TIER_ZERO_LABEL} RETURN n")
+        already = sorted(n.name for n in tier_zero.nodes.values())
         if already:
             result.notes.append("Owned objects that are already Tier Zero: " + ", ".join(already))
+        if not any(n.owned and not n.tier_zero for n in graph.nodes.values()):
+            result.notes.append("No other owned object has a path to Tier Zero." if already else
+                                "No owned object has a path to Tier Zero (or nothing is marked owned).")
         return self._build(result, graph, None, lambda n: n.tier_zero)
 
     def reaching_tier_zero(self, objectids: Iterable[str]) -> tuple[set[str], list[str]]:

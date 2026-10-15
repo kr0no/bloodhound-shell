@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -132,6 +133,20 @@ def test_link_skipping_rows_uses_the_gutter() -> None:
     doc = svg.render(result, orientation="wrapped")
     assert any(f"L{svg.MARGIN / 2:.1f}," in p.get("d", "") for p in ET.fromstring(doc).iter(f"{NS}path"))
     assert texts(doc).count("HasSession") == 1
+
+
+def test_many_links_skipping_rows_stay_on_the_canvas() -> None:
+    hops: list[Node] = [node(f"H{i}@CORP.LOCAL") for i in range(24)]
+    items: list[Node | str] = [A]
+    for h in hops:
+        items += ["GenericWrite", h]
+    hosts = [node(f"SRV{i}.CORP.LOCAL", "Computer") for i in range(6)]
+    skips = [chain(A, "AdminTo", host, "HasSession", hops[16 + i]) for i, host in enumerate(hosts)]
+    doc = svg.render(PathResult("skip", paths=[chain(*items, "MemberOf", C), *skips]), orientation="wrapped")
+    width = size(doc)[0]
+    xs = [float(x) for p in ET.fromstring(doc).iter(f"{NS}path")
+          for x, _ in re.findall(r"(-?[\d.]+),(-?[\d.]+)", p.get("d", ""))]
+    assert xs and 0 < min(xs) and max(xs) < width
 
 
 def test_wide_fan_in_stays_horizontal() -> None:

@@ -146,9 +146,11 @@ def _horizontal(layout: Layout, labels: dict[str, tuple[str, str]], per_row: int
     for link in forward:
         col = layout.layer[link.source]
         gaps[col] = max(gaps[col], _pill_width(link.kinds) + 56)
-    x_center, right = [0.0] * len(columns), float(MARGIN)
+    skipping = sum(row_of[layout.layer[link.target]] - row_of[layout.layer[link.source]] > 1 for link in forward)
+    left = max(MARGIN, MARGIN / 2 + 6 * skipping)
+    x_center, right = [0.0] * len(columns), float(left)
     for cols in rows:
-        x = MARGIN
+        x = left
         for j, col in enumerate(cols):
             x_center[col] = x + col_width[col] / 2
             x += col_width[col] + (gaps[col] if j < len(cols) - 1 else 0)
@@ -168,7 +170,7 @@ def _horizontal(layout: Layout, labels: dict[str, tuple[str, str]], per_row: int
             wraps[rs].append((link, "out"))
             if rt - rs > 1:
                 wraps[rt - 1].append((link, "in"))
-                gutter[id(link)] = MARGIN / 2 - 6 * len(gutter)
+                gutter[id(link)] = left - MARGIN / 2 - 6 * len(gutter)
             unused.update(link.lane[1:-1])
 
     # Stack each column (nodes need more room than lanes), centre the columns of a row on each other,
@@ -219,7 +221,7 @@ def _horizontal(layout: Layout, labels: dict[str, tuple[str, str]], per_row: int
                 d += f" L{gx:.1f},{ry2 - 12:.1f} Q{gx:.1f},{ry2:.1f} {gx + 12:.1f},{ry2:.1f}"
                 d += _corner(gx, ry2, x2, entering=True)
             # Each wrapping link has its own channel, so its label gets a gap of its own.
-            pills.append(Pill(10_000 + len(pills), (x1 + (MARGIN if gx is not None else x2)) / 2, ry, link.kinds))
+            pills.append(Pill(10_000 + len(pills), (x1 + (left if gx is not None else x2)) / 2, ry, link.kinds))
             d += f" L{x2:.1f},{y2 - R - 9:.1f}"
             edges += [_stroke(d, color), _arrow(x2, y2 - R, "down", color)]
             continue
