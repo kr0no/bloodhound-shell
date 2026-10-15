@@ -24,10 +24,12 @@ def to_json(data: Any) -> str:
 
 def report_rows(report: EntityReport) -> tuple[list[str], list[dict[str, Any]]]:
     """Flatten a report into CSV rows (summary as key/value, views as relationships)."""
+    summary = [{"field": f.label, "value": _flat(f.value)} for f in report.summary()]
     if not report.views:
-        rows = [{"field": f.label, "value": _flat(f.value)} for f in report.summary()]
-        return ["field", "value"], rows
-    rows = [{"view": v.key, **r.as_dict()} for v in report.views for r in v.rows]
+        return ["field", "value"], summary
+    # With --all the summary comes first, as in the JSON export.
+    rows = [{"view": "summary", **s} for s in summary] if report.show_summary else []
+    rows += [{"view": v.key, **r.as_dict()} for v in report.views for r in v.rows]
     if not rows:
         return ["view", *ROW_FIELDS], rows
     # Views have different row types: the columns are every field seen, in order.
@@ -41,11 +43,13 @@ def node_rows(nodes: Iterable[Node]) -> tuple[list[str], list[dict[str, Any]]]:
 def names(columns: Sequence[Column], rows: Iterable[Any]) -> list[str]:
     """The object each row of a table is about, once each, for `--names-only` and `.txt` files."""
     attrs = ["name" if c.attr == "label" else c.attr for c in columns]
+    dicts = [row if isinstance(row, dict) else row.as_dict() for row in rows]
     key = next((a for a in attrs if a in NAME_KEYS), None)
+    if key is None and dicts:  # a table showing a location instead: the name is in the row data
+        key = next((k for k in ("name", "gpo", "linked_to") if k in dicts[0]), None)
     if key is None:
         return []
-    values = (row.get(key) if isinstance(row, dict) else row.as_dict().get(key) for row in rows)
-    return list(dict.fromkeys(str(v) for v in values if v))
+    return list(dict.fromkeys(str(row.get(key)) for row in dicts if row.get(key)))
 
 
 def node_names(nodes: Iterable[Node]) -> list[str]:

@@ -101,6 +101,12 @@ def _titled(title: str, backend: str) -> str:
     return f"{title} (REST)" if backend == "rest" else title
 
 
+def _titled_table(title: str) -> Table:
+    # min_width: a table narrower than its title would wrap it ("Rows" above "[1]").
+    return Table(title=Text(title), title_justify="left", box=box.SIMPLE_HEAD, header_style="bold",
+                 min_width=len(title))
+
+
 def _more(shown: int, total: int, what: str, flag: str) -> Text:
     return Text(f"showing {shown} of {total} {what}; use {flag} 0 to show all or -o FILE to export", style="yellow")
 
@@ -307,8 +313,7 @@ class Renderer:
         """`dn` adds the distinguished name, which tells same-named OUs apart; `total` counts rows not shown."""
         nodes = list(nodes)
         count = len(nodes) if total is None else total
-        table = Table(title=Text(f"{title} [{count}]"), title_justify="left", box=box.SIMPLE_HEAD,
-                      header_style="bold")
+        table = _titled_table(f"{title} [{count}]")
         headers = ("Type", "Name", "Domain", *(("Distinguished name",) if dn else ()), "Object ID", "Enabled",
                    "T0", "Owned")
         for header in headers:
@@ -333,8 +338,7 @@ class Renderer:
             return
         self.nodes(graph.nodes.values(), "Nodes")
         if graph.edges:
-            table = Table(title=f"Edges [{len(graph.edges)}]", title_justify="left", box=box.SIMPLE_HEAD,
-                          header_style="bold")
+            table = _titled_table(f"Edges [{len(graph.edges)}]")
             for header in ("Source", "Edge", "Target"):
                 table.add_column(header, overflow="fold")
             for e in graph.edges:
@@ -345,7 +349,7 @@ class Renderer:
             self.console.print(table)
 
     def _literal_table(self, rows: list[dict[str, Any]]) -> None:
-        table = Table(title=f"Rows [{len(rows)}]", title_justify="left", box=box.SIMPLE_HEAD, header_style="bold")
+        table = _titled_table(f"Rows [{len(rows)}]")
         keys = list(dict.fromkeys(key for row in rows for key in row))
         for key in keys:
             table.add_column(str(key), overflow="fold")

@@ -15,8 +15,9 @@ from rich.console import Console
 
 from bhshell.cli import main
 from bhshell.config import CachedSession, Config
-from bhshell.models.entities import Node
-from bhshell.models.results import Column, ContainerRow
+from bhshell.models.entities import Graph, Node
+from bhshell.models.results import Column, ContainerRow, GPOTargetRow
+from bhshell.queries.gpos import LINK_COLS
 from bhshell.queries.paths import PathResult, PathService
 from bhshell.render import export, views
 from bhshell.render.views import Renderer
@@ -68,7 +69,10 @@ def test_user_all_report_and_csv_export(shell: BHShell, tmp_path: Path) -> None:
                      "AdminTo", "WS01.CORP.LOCAL", "Exported to"):
         assert expected in out
     rows = list(csv.DictReader(target.open()))
-    assert {r["view"] for r in rows} >= {"groups", "outbound", "inbound", "sessions", "privs_held"}
+    assert {r["view"] for r in rows} >= {"summary", "groups", "outbound", "inbound", "sessions", "privs_held"}
+    assert {"field": "Name", "value": "JDOE@CORP.LOCAL"}.items() <= rows[0].items()
+    run(shell, f"user CORP\\jdoe --groups -o {target}")
+    assert "summary" not in {r["view"] for r in csv.DictReader(target.open())}
 
 
 def test_view_flags_only(shell: BHShell) -> None:
@@ -121,6 +125,9 @@ def test_names_follow_the_table_direction() -> None:
     assert export.names([Column("OU", "label")], [ContainerRow(name="SERVERS@CORP.LOCAL", kind="OU", depth=1)]) \
         == ["SERVERS@CORP.LOCAL"]
     assert export.names([Column("Right", "edge")], rows) == []
+    # `gpo -l` shows where each link sits; the names are the linked domains and OUs.
+    assert export.names(LINK_COLS, [GPOTargetRow(linked_to="WEB@CORP.LOCAL", kind="OU",
+                                                 location="CORP.LOCAL/SERVERS/WEB")]) == ["WEB@CORP.LOCAL"]
 
 
 def test_names_only_for_hunt_and_cypher(shell: BHShell, tmp_path: Path) -> None:
@@ -358,3 +365,9 @@ def test_graph_does_not_ask_outside_the_repl(three_paths: BHShell) -> None:
     assert not three_paths.can_ask()  # -c / -s runs and tests never reach preloop()
     out = run(three_paths, "path --owned -g")
     assert "● B" in out and "● D" in out
+
+
+def test_narrow_table_keeps_its_title_on_one_line(shell: BHShell) -> None:
+    shell.ui.console.export_text(clear=True)
+    shell.ui.graph(Graph(rows=[{"c": 5}]))
+    assert "Rows [1]" in shell.ui.console.export_text(clear=True)
