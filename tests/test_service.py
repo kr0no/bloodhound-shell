@@ -278,6 +278,35 @@ def test_rest_fallback_when_cypher_disabled() -> None:
         assert [r.target for r in view.rows] == ["IT ADMINS@CORP.LOCAL"]
 
 
+def test_rest_lookup_after_a_failed_cypher_query_has_full_properties() -> None:
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=500,
+                 json={"errors": [{"message": "query timed out"}]})
+        rsps.add(responses.GET, f"{BASE}api/v2/search",
+                 json={"data": [{"objectid": JDOE, "type": "User", "name": "JDOE@CORP.LOCAL"}]})
+        rsps.add(responses.GET, f"{BASE}api/v2/users/{JDOE}",
+                 json={"data": {"props": {"name": "JDOE@CORP.LOCAL", "objectid": JDOE, "hasspn": True}}})
+        client = BHClient(BASE)
+        client.set_jwt("t")
+        svc = EntityService(client)
+        node = svc.resolve("jdoe", "User")
+        assert svc.cypher_available is not False and node.properties["hasspn"] is True
+
+
+def test_group_sessions_via_rest_list_the_computers() -> None:
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
+        rsps.add(responses.GET, f"{BASE}api/v2/groups/{IT_ADMINS}/sessions",
+                 json={"count": 1, "data": [{"objectID": WS01, "name": "WS01.CORP.LOCAL", "label": "Computer"}]})
+        client = BHClient(BASE)
+        client.set_jwt("t")
+        svc = EntityService(client)
+        group = Node(id="2", objectid=IT_ADMINS, kind="Group", name="IT ADMINS@CORP.LOCAL")
+        view = svc.sessions(group)[0]
+        assert view.columns[0].header == "Computer"
+        assert [(r.principal, r.target) for r in view.rows] == [("", "WS01.CORP.LOCAL")]
+
+
 def test_rest_items_carry_tier_zero_kind() -> None:
     item = {"objectID": "S-1-5-21-1-512", "name": "DOMAIN ADMINS@CORP.LOCAL", "label": "Group",
             "kinds": ["Group", "Base", "Tag_Tier_Zero"]}

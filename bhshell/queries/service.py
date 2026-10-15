@@ -359,10 +359,14 @@ class EntityService:
         """
         ident = parse_identifier(name, domain=domain, kind=kind)
         kinds = (kind,) if kind else (kinds or ENTITY_KINDS)
-        candidates = self._with_fallback(
-            lambda: self._resolve_cypher(ident, kind),
-            lambda _: self._resolve_rest(ident, kinds),
-        )
+        via_rest = False
+
+        def rest(_: str) -> list[Node]:
+            nonlocal via_rest
+            via_rest = True
+            return self._resolve_rest(ident, kinds)
+
+        candidates = self._with_fallback(lambda: self._resolve_cypher(ident, kind), rest)
         unique: dict[str, Node] = {}
         for node in candidates:
             if _matches(node, ident, kinds):
@@ -381,7 +385,7 @@ class EntityService:
                 hint = "" if any(n.kind in SID_KINDS for n in found) else GUID_HINT
             raise AmbiguousMatchError(name, found, hint=hint)
         node = next(iter(unique.values()))
-        if self.cypher_available is False:
+        if via_rest:  # search results carry a few properties only, whether Cypher is off or the lookup failed
             node = self._hydrate_rest(node)
         return node
 
@@ -568,7 +572,17 @@ class EntityService:
             rows.sort(key=lambda r: (not r.tier_zero, r.principal, r.target))
             return [self._capped(ViewResult("sessions", title, cols, rows), g)]
 
-        return self._with_fallback(via_cypher, lambda why: self._rest_view(node, "sessions", title, cols, why))
+        def via_rest(why: str) -> list[ViewResult]:
+            if node.kind != "Group":
+                return self._rest_view(node, "sessions", title, cols, why)
+            # BloodHound only gives the computers: which member is logged on stays unknown.
+            views = self._rest_view(node, "sessions", title, SESSION_COLS["User"], why)
+            for row in views[0].rows:
+                row.principal, row.principal_kind = "", ""
+            views[0].notes.append("REST fallback: the computers where members are logged on, not which members.")
+            return views
+
+        return self._with_fallback(via_cypher, via_rest)
 
     def privs(self, node: Node) -> list[ViewResult]:
         held_title = "Execution privileges held (AdminTo, CanRDP, ExecuteDCOM, CanPSRemote, SQLAdmin)"
