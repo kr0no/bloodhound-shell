@@ -211,7 +211,9 @@ def test_pre2k_rows_give_the_password_to_try() -> None:
     assert [(r["name"], r["password"], r["passwordnotreqd"]) for r in rows] == [
         ("RECEPTIONDESK02.CORP.LOCAL", "receptiondesk0", True), ("KIOSK01.CORP.LOCAL", "kiosk01", False)]
     query = CHECKS_BY_ID["pre2k"].query(HuntOptions())
-    assert "MATCH (n:Computer)" in query and "n.pwdlastset - n.whencreated < 300" in query
+    assert "MATCH (n:Computer)" in query and "(n.pwdlastset - n.whencreated) < 50520" in query
+    # A whencreated shifted by the collector's UTC offset still counts as set at creation.
+    assert "((n.pwdlastset - n.whencreated) + 120) % 900 + 900) % 900 < 240" in query
 
 
 def test_default_password_rows_put_must_change_then_newest_first() -> None:

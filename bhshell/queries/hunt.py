@@ -89,7 +89,11 @@ DEFAULT_DESCRIPTIONS = (
 # Users scanned for a path to Tier Zero (kerberoastable, asreproast): one allShortestPaths query.
 PATH_ENRICH_MAX = 500
 # A password changed this many seconds or less from the account's creation was set when it was created.
-AT_CREATION = 300
+AT_CREATION = 120
+# whencreated can be shifted by the UTC offset of the host that collected it (pwdlastset is not): offsets
+# are whole quarter hours, up to 14 hours either way.
+TZ_STEP = 900
+TZ_MAX = 14 * 3600
 # A pre-Windows 2000 computer account's password: its lowercase name without the '$', cut to 14 characters.
 PRE2K_PASSWORD_MAX = 14
 # What an admin account adds to its owner's standard account name (adm_jdoe, jdoe-a, da.jdoe);
@@ -340,8 +344,10 @@ _PRIVILEGED_USER = f"(u:{TIER_ZERO_LABEL} OR u.admincount = true)"
 _NEVER_LOGGED_ON = ("(n.lastlogon IS NULL OR n.lastlogon <= 0)",
                     "(n.lastlogontimestamp IS NULL OR n.lastlogontimestamp <= 0)")
 # whencreated > 0 also skips the property-less nodes BloodHound adds for objects it only saw referenced.
-_PWD_AT_CREATION = (f"(n.whencreated > 0 AND n.pwdlastset - n.whencreated < {AT_CREATION} "
-                    f"AND n.pwdlastset - n.whencreated > -{AT_CREATION})")
+_PWD_DELTA = "(n.pwdlastset - n.whencreated)"
+_PWD_AT_CREATION = (f"(n.whencreated > 0 AND {_PWD_DELTA} < {TZ_MAX + AT_CREATION} "
+                    f"AND {_PWD_DELTA} > -{TZ_MAX + AT_CREATION} "
+                    f"AND (({_PWD_DELTA} + {AT_CREATION}) % {TZ_STEP} + {TZ_STEP}) % {TZ_STEP} < {2 * AT_CREATION})")
 # What makes an account worth attacking, and so what a honeytoken carries.
 _LURES = (("hasspn", "SPN"), ("dontreqpreauth", "no preauth"), ("admincount", "adminCount"))
 
