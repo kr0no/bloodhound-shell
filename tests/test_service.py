@@ -191,6 +191,8 @@ def test_to_count_rewrites_return() -> None:
     assert Q.to_count("MATCH (n:User) WHERE n.enabled = true RETURN n LIMIT 50") == \
         "MATCH (n:User) WHERE n.enabled = true RETURN count(n)"
     assert Q.to_count("MATCH p=(a)-[r]->(b) RETURN p LIMIT 5") == "MATCH p=(a)-[r]->(b) RETURN count(p)"
+    assert Q.to_count("MATCH (n) RETURN n ORDER BY n.pwdlastset = 0 DESC, n.name LIMIT 9") == "MATCH (n) RETURN count(n)"
+    assert Q.limit_of("MATCH (n) RETURN n ORDER BY n.name LIMIT 9") == 9
     assert Q.to_count("MATCH (n) RETURN n") is None
 
 

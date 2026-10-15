@@ -27,17 +27,17 @@ def lit(value: str) -> str:
     return f"'{escaped}'"
 
 
-_RETURN_LIMIT = re.compile(r"\s+RETURN\s+(\w+)\s+LIMIT\s+(\d+)\s*$", re.IGNORECASE)
+_RETURN_LIMIT = re.compile(r"\s+RETURN\s+(\w+)(?:\s+ORDER\s+BY\s+.+?)?\s+LIMIT\s+(\d+)\s*$", re.IGNORECASE)
 
 
 def limit_of(query: str) -> int | None:
-    """The LIMIT of a `... RETURN x LIMIT n` query (`None` for other shapes)."""
+    """The LIMIT of a `... RETURN x [ORDER BY ...] LIMIT n` query (`None` for other shapes)."""
     m = _RETURN_LIMIT.search(query)
     return int(m.group(2)) if m else None
 
 
 def to_count(query: str) -> str | None:
-    """Turn `... RETURN x LIMIT n` into `... RETURN count(x)` (`None` for other shapes)."""
+    """Turn `... RETURN x [ORDER BY ...] LIMIT n` into `... RETURN count(x)` (`None` for other shapes)."""
     m = _RETURN_LIMIT.search(query)
     return f"{query[:m.start()]} RETURN count({m.group(1)})" if m else None
 

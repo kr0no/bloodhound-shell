@@ -88,6 +88,14 @@ DEFAULT_DESCRIPTIONS = (
 )
 # Users scanned for a path to Tier Zero (kerberoastable, asreproast): one allShortestPaths query.
 PATH_ENRICH_MAX = 500
+# A password changed this many seconds or less from the account's creation was set when it was created.
+AT_CREATION = 300
+# A pre-Windows 2000 computer account's password: its lowercase name without the '$', cut to 14 characters.
+PRE2K_PASSWORD_MAX = 14
+# What an admin account adds to its owner's standard account name (adm_jdoe, jdoe-a, da.jdoe);
+# a separator alone (_jdoe) counts too.
+TWIN_MARKERS = ("a", "adm", "admin", "da", "ea", "sa", "t0", "t1", "t2", "x", "priv")
+TWIN_SEPARATORS = "-_. "
 
 
 @dataclass
@@ -222,6 +230,7 @@ TARGET_KIND = Column("Target type", "target_kind", "kind")
 PATH_T0 = Column("Path to T0", "path_to_t0", "risk")
 ENCTYPES = Column("Enc types", "enctypes")
 FROM_OWNED = Column("From", "from_owned")
+CREATED = Column("Created", "created", "date")
 
 
 def _unconstrained_rows(g: Graph, _: HuntOptions) -> list[Row]:
@@ -328,6 +337,13 @@ _LEGACY_OS_CONDITION = "(" + " OR ".join(
     + [f"(n.operatingsystem CONTAINS {Q.lit(WINDOWS_10)} AND "
        + " AND ".join(f"NOT n.operatingsystem CONTAINS {Q.lit(v)}" for v in LTSC) + ")"]) + ")"
 _PRIVILEGED_USER = f"(u:{TIER_ZERO_LABEL} OR u.admincount = true)"
+_NEVER_LOGGED_ON = ("(n.lastlogon IS NULL OR n.lastlogon <= 0)",
+                    "(n.lastlogontimestamp IS NULL OR n.lastlogontimestamp <= 0)")
+# whencreated > 0 also skips the property-less nodes BloodHound adds for objects it only saw referenced.
+_PWD_AT_CREATION = (f"(n.whencreated > 0 AND n.pwdlastset - n.whencreated < {AT_CREATION} "
+                    f"AND n.pwdlastset - n.whencreated > -{AT_CREATION})")
+# What makes an account worth attacking, and so what a honeytoken carries.
+_LURES = (("hasspn", "SPN"), ("dontreqpreauth", "no preauth"), ("admincount", "adminCount"))
 
 
 # Path to Tier Zero (kerberoastable, asreproast)
@@ -398,6 +414,87 @@ def _password_rows(g: Graph, _: HuntOptions) -> list[Row]:
         if _PASSWORD_RE.search(description) and not description.lower().startswith(DEFAULT_DESCRIPTIONS):
             rows.append(node_row(n, attribute="description", value=description))
     return sorted(rows, key=lambda r: (r["attribute"] == "description", not r["tier_zero"], r["name"]))
+
+
+# Guessable passwords
+
+def _pre2k(o: HuntOptions) -> str:
+    where = Q.where("n.enabled = true", *_NEVER_LOGGED_ON, f"(n.passwordnotreqd = true OR {_PWD_AT_CREATION})",
+                    o.dom("n"))
+    return f"MATCH (n:Computer){where} RETURN n LIMIT {o.limit}"
+
+
+def pre2k_password(n: Node) -> str:
+    name = n.samaccountname or n.name.split(".")[0]
+    return name.removesuffix("$").lower()[:PRE2K_PASSWORD_MAX]
+
+
+def _pre2k_rows(g: Graph, _: HuntOptions) -> list[Row]:
+    rows = [node_row(n, password=pre2k_password(n), created=n.properties.get("whencreated"),
+                     pwdlastset=n.properties.get("pwdlastset"),
+                     passwordnotreqd=bool(n.properties.get("passwordnotreqd")),
+                     os=n.properties.get("operatingsystem") or "")
+            for n in g.nodes.values()]
+    return sorted(rows, key=lambda r: (not r["passwordnotreqd"], r["name"]))
+
+
+def _default_passwords(o: HuntOptions) -> str:
+    no_lure = [f"(n.{prop} IS NULL OR n.{prop} = false)" for prop, _ in _LURES]
+    where = Q.where("n.enabled = true", *_NEVER_LOGGED_ON, f"(n.pwdlastset = 0 OR {_PWD_AT_CREATION})", *no_lure,
+                    o.dom("n"))
+    # Sorted on the server too, so a truncated list keeps the accounts worth trying.
+    return f"MATCH (n:User){where} RETURN n ORDER BY n.pwdlastset = 0 DESC, n.whencreated DESC LIMIT {o.limit}"
+
+
+def _default_password_rows(g: Graph, _: HuntOptions) -> list[Row]:
+    rows = [node_row(n, created=n.properties.get("whencreated"), pwdlastset=n.properties.get("pwdlastset"),
+                     must_change=n.properties.get("pwdlastset") == 0)
+            for n in g.nodes.values()]
+    # Newest first: an account that has waited years for its first logon is more likely dead, or a decoy.
+    return sorted(rows, key=lambda r: (not r["must_change"], -(r["created"] or 0), r["name"]))
+
+
+def _twins(o: HuntOptions) -> str:
+    alike = ("(size(n.samaccountname) >= 3 AND (toLower(u.samaccountname) STARTS WITH toLower(n.samaccountname) "
+             "OR toLower(u.samaccountname) ENDS WITH toLower(n.samaccountname))) "
+             "OR (n.displayname CONTAINS ' ' AND toLower(u.displayname) CONTAINS toLower(n.displayname))")
+    standard = Q.where("n.enabled = true", "n.domain = u.domain", "n.objectid <> u.objectid", _NOT_T0,
+                       "(n.admincount IS NULL OR n.admincount = false)", f"({alike})")
+    # Both accounts come back as plain nodes; _twin_rows pairs them again, more strictly.
+    return (f"MATCH (u:User){Q.where(_PRIVILEGED_USER, 'u.enabled = true', o.dom('u'))} "
+            f"MATCH (n:User){standard} UNWIND [u, n] AS x RETURN x LIMIT {o.limit}")
+
+
+def twin_match(admin: Node, user: Node) -> str:
+    """What makes `admin` look like the admin account of `user`'s owner ('' if nothing does)."""
+    a, s = admin.samaccountname.lower(), user.samaccountname.lower()
+    if len(s) >= 3 and a != s and (a.startswith(s) or a.endswith(s)):
+        marker = (a[len(s):] if a.startswith(s) else a[:-len(s)]).strip(TWIN_SEPARATORS)
+        if not marker or marker in TWIN_MARKERS or "adm" in marker:
+            return "account name"
+    admin_name = str(admin.properties.get("displayname") or "")
+    user_name = str(user.properties.get("displayname") or "")
+    if " " in user_name and re.search(rf"(?<!\w){re.escape(user_name)}(?!\w)", admin_name, re.IGNORECASE):
+        return "display name"
+    return ""
+
+
+def _twin_rows(g: Graph, _: HuntOptions) -> list[Row]:
+    def privileged(n: Node) -> bool:
+        return n.tier_zero or bool(n.properties.get("admincount"))
+
+    admins = [n for n in g.nodes.values() if privileged(n)]
+    users = [n for n in g.nodes.values() if not privileged(n)]
+    rows = []
+    for a in admins:
+        for s in users:
+            match = twin_match(a, s) if a.domain == s.domain else ""
+            if match:
+                exposure = [label for prop, label in (("hasspn", "kerberoastable"),
+                                                      ("dontreqpreauth", "AS-REP roastable")) if s.properties.get(prop)]
+                rows.append(node_row(a, twin=s.name, match=match, twin_exposure=", ".join(exposure),
+                                     twin_owned=s.owned))
+    return sorted(rows, key=lambda r: (not r["twin_owned"], not r["twin_exposure"], not r["tier_zero"], r["name"]))
 
 
 # NTLM relay
@@ -479,10 +576,8 @@ _PKI_TARGET = "(" + " OR ".join(f"t:{k}" for k in PKI_KINDS) + ")"
 # OPSEC
 
 def _decoys(o: HuntOptions) -> str:
-    never = ("(n.lastlogon IS NULL OR n.lastlogon <= 0)",
-             "(n.lastlogontimestamp IS NULL OR n.lastlogontimestamp <= 0)")
-    lure = "(n.hasspn = true OR n.dontreqpreauth = true OR n.admincount = true)"
-    where = Q.where("n.enabled = true", lure, *never, "n.samaccountname <> 'krbtgt'", o.dom("n"))
+    lure = "(" + " OR ".join(f"n.{prop} = true" for prop, _ in _LURES) + ")"
+    where = Q.where("n.enabled = true", lure, *_NEVER_LOGGED_ON, "n.samaccountname <> 'krbtgt'", o.dom("n"))
     return f"MATCH (n:User){where} RETURN n LIMIT {o.limit}"
 
 
@@ -490,8 +585,7 @@ def _decoy_rows(g: Graph, o: HuntOptions) -> list[Row]:
     rows = _user_rows(g, o)
     for r, n in zip(rows, (g.find(r["objectid"]) for r in rows), strict=True):
         props = n.properties if n else {}
-        lures = [label for prop, label in (("hasspn", "SPN"), ("dontreqpreauth", "no preauth"),
-                                           ("admincount", "adminCount")) if props.get(prop)]
+        lures = [label for prop, label in _LURES if props.get(prop)]
         r.update(lures=", ".join(lures), created=props.get("whencreated"))
     return rows
 
@@ -574,6 +668,12 @@ CHECKS: tuple[Check, ...] = (
           "mentioning a password.",
           _password_attrs, (NAME, KIND, DOMAIN, Column("Attribute", "attribute"), Column("Value", "value"), T0,
                             OWNED), _password_rows, fallback=lambda o: _password_attrs(o, lower=False)),
+    Check("pre2k", "Computer accounts that may keep a default password", "high",
+          "Enabled computers that never logged on, with the password set when the account was created or not "
+          "required. Accounts created as pre-Windows 2000 computers keep their lowercase name as password; "
+          "Timeroasting tests them offline, without a logon attempt. No operating system: never joined.",
+          _pre2k, (NAME, DOMAIN, Column("Password to try", "password"), CREATED, PWD,
+                   Column("Pwd not required", "passwordnotreqd", "risk"), OS), _pre2k_rows),
     Check("object-takeover", "Account and computer takeover primitives", "high",
           "Shadow Credentials (AddKeyCredentialLink), targeted Kerberoasting (WriteSPN), RBCD "
           "(AddAllowedToAct, WriteAccountRestrictions) and explicit certificate mappings "
@@ -636,6 +736,19 @@ CHECKS: tuple[Check, ...] = (
           "Enabled users with PASSWD_NOTREQD (may have an empty password).",
           _node_check("User", "n.passwordnotreqd = true", "n.enabled = true"),
           (NAME, DOMAIN, PWD, LOGON, T0), _user_rows),
+    Check("default-passwords", "Users still on their initial password", "medium",
+          "Enabled users that never logged on, with the password set when the account was created or to be "
+          "changed at next logon, newest first. One guess each is still a spray: pick a few. Accounts with an "
+          "SPN, no pre-authentication or adminCount are left to 'decoys'.",
+          _default_passwords, (NAME, DOMAIN, CREATED, PWD, Column("Must change", "must_change", "risk"), T0),
+          _default_password_rows),
+    Check("admin-twins", "Privileged accounts with a standard twin", "medium",
+          "Tier Zero or adminCount users whose owner also has a standard account, matched on the account name "
+          "(adm_jdoe, jdoe-a) or the display name. People reuse passwords between the two, and the standard "
+          "one is easier to get: owned or roastable twins first.",
+          _twins, (NAME, T0, Column("Standard account", "twin"), Column("Matched on", "match"),
+                   Column("Twin exposure", "twin_exposure"), Column("Twin owned", "twin_owned", "owned")),
+          _twin_rows),
     Check("legacy-os", "End-of-life operating systems", "medium",
           "Enabled computers running Windows 2000/2003/2008/2012, XP, Vista, 7, 8 or 10 (except LTSC).",
           _node_check("Computer", "n.enabled = true", _LEGACY_OS_CONDITION),
@@ -651,7 +764,7 @@ CHECKS: tuple[Check, ...] = (
     Check("decoys", "Possible honeytokens", "info",
           "Enabled users that look attractive (SPN, no pre-authentication or adminCount) but have never "
           "logged on: check before roasting or using them.",
-          _decoys, (NAME, DOMAIN, Column("Lures", "lures"), Column("Created", "created", "date"), PWD, T0),
+          _decoys, (NAME, DOMAIN, Column("Lures", "lures"), CREATED, PWD, T0),
           _decoy_rows),
 )
 CHECKS_BY_ID: dict[str, Check] = {c.id: c for c in CHECKS}

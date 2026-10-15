@@ -199,6 +199,53 @@ def test_decoy_rows_list_the_lures() -> None:
     assert rows[0]["lures"] == "SPN, adminCount" and rows[0]["created"] == 1600000000
 
 
+def test_pre2k_rows_give_the_password_to_try() -> None:
+    nodes = {"a": node("Computer", "A", "KIOSK01.CORP.LOCAL", samaccountname="KIOSK01$", whencreated=1600000000),
+             "b": node("Computer", "B", "RECEPTIONDESK02.CORP.LOCAL", samaccountname="RECEPTIONDESK02$",
+                       passwordnotreqd=True)}
+    rows = CHECKS_BY_ID["pre2k"].rows(g(nodes, []), HuntOptions())
+    assert [(r["name"], r["password"], r["passwordnotreqd"]) for r in rows] == [
+        ("RECEPTIONDESK02.CORP.LOCAL", "receptiondesk0", True), ("KIOSK01.CORP.LOCAL", "kiosk01", False)]
+    query = CHECKS_BY_ID["pre2k"].query(HuntOptions())
+    assert "MATCH (n:Computer)" in query and "n.pwdlastset - n.whencreated < 300" in query
+
+
+def test_default_password_rows_put_must_change_then_newest_first() -> None:
+    nodes = {"a": node("User", "A", "OLD@CORP.LOCAL", whencreated=1500000000, pwdlastset=1500000000),
+             "b": node("User", "B", "NEW@CORP.LOCAL", whencreated=1700000000, pwdlastset=1700000000),
+             "c": node("User", "C", "RESET@CORP.LOCAL", whencreated=1400000000, pwdlastset=0)}
+    rows = CHECKS_BY_ID["default-passwords"].rows(g(nodes, []), HuntOptions())
+    assert [(r["name"], r["must_change"]) for r in rows] == [
+        ("RESET@CORP.LOCAL", True), ("NEW@CORP.LOCAL", False), ("OLD@CORP.LOCAL", False)]
+    query = CHECKS_BY_ID["default-passwords"].query(HuntOptions())
+    assert "(n.hasspn IS NULL OR n.hasspn = false)" in query
+    assert query.endswith("ORDER BY n.pwdlastset = 0 DESC, n.whencreated DESC LIMIT 5000")
+
+
+def test_twin_rows_pair_admin_and_standard_accounts() -> None:
+    nodes = {
+        "adm": node("User", "A1", "ADM_JDOE@CORP.LOCAL", t0=True, samaccountname="adm_jdoe"),
+        "jdoe": node("User", "U1", "JDOE@CORP.LOCAL", samaccountname="jdoe", hasspn=True),
+        "da": node("User", "A2", "ASMITH.DA@CORP.LOCAL", admincount=True, samaccountname="asmith.da",
+                   displayname="Alice Smith (Domain Admin)"),
+        "asmith": node("User", "U2", "ALICE@CORP.LOCAL", samaccountname="alice", displayname="Alice Smith",
+                       owned=True),
+        "administrator": node("User", "A3", "ADMINISTRATOR@CORP.LOCAL", t0=True, samaccountname="administrator"),
+        "admin": node("User", "U3", "ADMIN@CORP.LOCAL", samaccountname="admin"),
+        "smithers": node("User", "U4", "ASMITHERS@CORP.LOCAL", samaccountname="asmithers",
+                         displayname="Alice Smithers"),
+        "other": node("User", "U5", "JDOE@DEV.CORP.LOCAL", domain=DEV, samaccountname="jdoe"),
+        "_bob": node("User", "A4", "_BOB@CORP.LOCAL", admincount=True, samaccountname="_bob"),
+        "bob": node("User", "U6", "BOB@CORP.LOCAL", samaccountname="bob"),
+    }
+    rows = CHECKS_BY_ID["admin-twins"].rows(g(nodes, []), HuntOptions())
+    assert [(r["name"], r["twin"], r["match"], r["twin_exposure"], r["twin_owned"]) for r in rows] == [
+        ("ASMITH.DA@CORP.LOCAL", "ALICE@CORP.LOCAL", "display name", "", True),
+        ("ADM_JDOE@CORP.LOCAL", "JDOE@CORP.LOCAL", "account name", "kerberoastable", False),
+        ("_BOB@CORP.LOCAL", "BOB@CORP.LOCAL", "account name", "", False)]
+    assert "UNWIND [u, n] AS x RETURN x LIMIT" in CHECKS_BY_ID["admin-twins"].query(HuntOptions())
+
+
 def test_impersonable_admins_drop_protected_users(client: BHClient, monkeypatch: pytest.MonkeyPatch) -> None:
     svc = EntityService(client)
     admins = {"a": node("User", "A", "A@CORP.LOCAL", t0=True), "b": node("User", "B", "B@CORP.LOCAL", t0=True)}

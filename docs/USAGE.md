@@ -419,8 +419,8 @@ a matching DPI so Word inserts it at the same size as the SVG.
 | Severity | Checks |
 |---|---|
 | critical | `dcsync` (replication rights outside Tier Zero), `tier-zero-control` (ACL, delegation, credential-read or execution rights on Tier Zero objects from outside it), `broad-rights` (Everyone / Anonymous / Authenticated Users / Domain Users / Domain Computers / Users / Pre-Windows 2000 Compatible Access with control or execution rights), `adcs` (ESC*, ESC8 relay, GoldenCert) |
-| high | `adcs-ca-control` (ESC7), `adcs-templates` (ESC2, ESC15), `adcs-pki-control` (ESC4, ESC5), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD, ESC14), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
-| medium | `constrained` (with protocol transition), `reenable`, `impersonable-admins`, `ntlm-hardening`, `stale-passwords` (`--days`, default 5 years), `pwd-not-required`, `legacy-os` |
+| high | `adcs-ca-control` (ESC7), `adcs-templates` (ESC2, ESC15), `adcs-pki-control` (ESC4, ESC5), `kerberoastable`, `asreproast`, `t0-sessions`, `cred-readers` (LAPS / gMSA / sMSA), `passwords-in-attributes`, `pre2k` (computers that may keep a default password), `object-takeover` (Shadow Credentials, targeted Kerberoasting, RBCD, ESC14), `gpo-control`, `relay`, `foreign-access`, `unconstrained` (outside Tier Zero), `sidhistory`, `trust-sid-filtering` |
+| medium | `constrained` (with protocol transition), `reenable`, `impersonable-admins`, `ntlm-hardening`, `stale-passwords` (`--days`, default 5 years), `pwd-not-required`, `default-passwords`, `admin-twins`, `legacy-os` |
 | low | `admincount-orphans`, `no-laps` |
 | info | `decoys` (possible honeytokens) |
 
@@ -438,6 +438,18 @@ Notes on some checks:
   `webclientrunning`, `ldapsigning`, `ldapsepa`). Without them they report nothing.
 - `decoys` lists enabled users that look attractive (SPN, no pre-authentication, adminCount) but
   have never logged on. Check them before roasting or using them.
+- `pre2k` lists enabled computers that never logged on and whose password was set when the account
+  was created (or is not required). An account created as a pre-Windows 2000 computer keeps its
+  lowercase name as password, shown in `Password to try`. Timeroasting tests them all offline.
+  A computer with no operating system was never joined.
+- `default-passwords` lists enabled users that never logged on, with the password set at creation
+  or to be changed at next logon: those that must change first, then the newest. In hybrid
+  domains, users who only sign in to the cloud never update `lastLogonTimestamp`, so the list can
+  be long; guessing one password on every account is a spray. Accounts with a lure are left to
+  `decoys`.
+- `admin-twins` pairs Tier Zero or adminCount users with a standard account of the same person,
+  matched on the account name (`adm_jdoe`, `jdoe-a`, `_jdoe`) or the display name. Owned and
+  roastable standard accounts come first: their password is worth trying on the admin account.
 - `legacy-os` includes Windows 10 (end of support October 2025), except the LTSC/LTSB editions.
 - `adcs-templates` lists the published templates that principals outside Tier Zero can enroll in
   and that meet the ESC2 or ESC15 conditions (see [Exploring AD CS](#exploring-ad-cs)). Enrollment
