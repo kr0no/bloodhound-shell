@@ -53,4 +53,5 @@ class LibraryCommands(BaseCommands):
             app.poutput(query.query)
             return
         app.require_auth()
-        self.show_graph(app.entities.run_cypher(query.query), as_json=args.json, output=args.output)
+        self.show_graph(app.entities.run_cypher(query.query), as_json=args.json, output=args.output,
+                        names_only=args.names_only)

@@ -153,12 +153,18 @@ class EntityCommands(BaseCommands):
                 app.ui.warn(f"View '{key}' does not apply to a {node.kind}; skipped.")
         report = app.entities.report(node, selected, show_summary=args.all or not selected)
 
+        if report.views:
+            names = list(dict.fromkeys(name for v in report.views for name in export.names(v.columns, v.rows)))
+        else:
+            names = [node.name]
         if args.json:
             app.poutput(export.to_json(report.as_dict()))
+        elif args.names_only:
+            self.print_names(names)
         else:
             app.ui.report(report, self.max_rows(args))
         if args.output:
-            self.export(args.output, report.as_dict(), export.report_rows(report))
+            self.export(args.output, report.as_dict(), export.report_rows(report), names)
 
     @with_argparser(lambda: _entity_parser("User"))
     def do_user(self, args: argparse.Namespace) -> None:

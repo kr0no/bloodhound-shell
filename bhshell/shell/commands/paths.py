@@ -46,7 +46,7 @@ def _path_parser() -> Cmd2ArgumentParser:
     p.add_argument("-p", "--pick", type=_selection, metavar="N",
                    help="only these paths, numbered as in the list: 2, 1,3 or 2-4")
     p.add_argument("-n", "--max-paths", type=int, default=20, metavar="N", help="paths shown (default 20, 0 = all)")
-    add_output_args(p, formats=(".json", ".csv", ".svg", ".png"))
+    add_output_args(p, formats=(".json", ".csv", ".svg", ".png"), names=False)
     p.add_argument("--svg-layout", choices=("auto", "horizontal", "vertical", "wrapped"), default="auto",
                    help="SVG/PNG layout (default auto: whichever prints largest on a portrait page; "
                         "wrapped: rows of hops, like lines of text)")

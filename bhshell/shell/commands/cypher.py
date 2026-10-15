@@ -12,7 +12,7 @@ from bhshell.errors import BHError
 from bhshell.shell.commands.base import BaseCommands, output_path
 
 CYPHER_HELP = """\
-Usage: cypher [--json] [-o FILE] [-f QUERY_FILE] [QUERY]
+Usage: cypher [--json | --names-only] [-o FILE] [-f QUERY_FILE] [QUERY]
 
 Run a raw Cypher query against BH (POST /api/v2/graphs/cypher) and render
 what it returns: nodes and edges, or values. The query is taken verbatim from
@@ -22,10 +22,13 @@ the command line, so '|', '>' and quotes need no escaping. For example:
   cypher MATCH p=(u:User)-[:MemberOf*1..]->(g:Group) WHERE g.name STARTS WITH 'DOMAIN ADMINS@' RETURN p
   cypher MATCH (n:Computer) RETURN n.operatingsystem AS os, count(n) AS total
   cypher -f queries/kerberoastable.cyp -o kerberoastable.csv
+  cypher --names-only MATCH (n:Computer) WHERE n.enabled = true RETURN n
 
 Options:
   --json        print the normalised result as JSON
-  -o FILE       export to FILE (.json or .csv; CSV contains the nodes, or the values)
+  --names-only  print only the names of the returned objects, one per line
+  -o FILE       export to FILE (.json, .csv or .txt; CSV contains the nodes, or the values;
+                TXT the object names)
   -f FILE       read the query from FILE
 """
 
@@ -34,6 +37,7 @@ Options:
 class CypherArgs:
     query: str
     json: bool = False
+    names_only: bool = False
     output: str | None = None
 
 
@@ -47,13 +51,15 @@ def parse_cypher_args(text: str) -> CypherArgs:
         remainder = remainder.lstrip()
         if flag == "--json":
             args.json = True
+        elif flag == "--names-only":
+            args.names_only = True
         elif flag in ("-o", "--output", "-f", "--file"):
             value, _, remainder = remainder.partition(" ")
             if not value:
                 raise BHError(f"Option {flag} requires a value")
             if flag in ("-o", "--output"):
                 try:
-                    args.output = output_path(value)
+                    args.output = output_path(value, (".json", ".csv", ".txt"))
                 except argparse.ArgumentTypeError as exc:
                     raise BHError(str(exc)) from exc
             else:
@@ -61,6 +67,8 @@ def parse_cypher_args(text: str) -> CypherArgs:
         else:
             break
         rest = remainder.lstrip()
+    if args.json and args.names_only:
+        raise BHError("--json and --names-only cannot be combined")
     if query_file:
         try:
             rest = Path(query_file).expanduser().read_text(encoding="utf-8")
@@ -91,7 +99,7 @@ class CypherCommands(BaseCommands):
         graph = app.entities.run_cypher(args.query)
         for node in graph.nodes.values():
             app.remember(node)
-        self.show_graph(graph, as_json=args.json, output=args.output)
+        self.show_graph(graph, as_json=args.json, output=args.output, names_only=args.names_only)
 
     def help_cypher(self) -> None:
         self.app.poutput(CYPHER_HELP)

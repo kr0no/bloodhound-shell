@@ -34,14 +34,13 @@ class MarkingService:
             raise UnsupportedFeature("Listing tagged objects needs the Cypher endpoint") from exc
         return sorted(graph.nodes.values(), key=lambda n: (n.kind, n.name))
 
-    def mark(self, node: Node, tag: Tag, *, add: bool = True) -> str:
-        """Add or remove `node` from the `tag` group. Returns a human-readable status."""
-        tag_obj = self._tag(tag)
+    def mark(self, node: Node, tag_obj: dict[str, Any], *, add: bool = True) -> str:
+        """Add or remove `node` from a tag returned by `tag`. Returns a human-readable status."""
         if add:
             return self._add(node, tag_obj)
         return self._remove(node, tag_obj)
 
-    def _tag(self, tag: Tag) -> dict[str, Any]:
+    def tag(self, tag: Tag) -> dict[str, Any]:
         """The Owned label, or the Tier Zero tier (the tier with the lowest position)."""
         try:
             resp = self.client.get("api/v2/asset-group-tags") or {}

@@ -105,9 +105,17 @@ class HuntCommands(BaseCommands):
             checks = self._scoped_checks(checks, bool(args.checks))
             opts.principals = self._scope(service, args)
         findings = [service.run(check, opts) for check in app.client.steps(checks)]
+        names = list(dict.fromkeys(name for f in findings for name in export.names(self._columns(f, opts), f.rows)))
 
         if args.json:
             app.poutput(export.to_json([f.as_dict() for f in findings]))
+        elif args.names_only:
+            for f in findings:
+                if f.error:
+                    app.ui.warn(f"{f.check.id}: {f.error}")
+                elif f.truncated:
+                    app.ui.warn(f"{f.check.id}: {truncation_note(opts.limit, [f.total], 'results')}")
+            self.print_names(names)
         elif not detail:
             app.ui.hunt_summary(findings)
             flag = " --owned" if args.owned else f" --from {args.source}" if args.source else ""
@@ -123,13 +131,16 @@ class HuntCommands(BaseCommands):
                 if f.error:
                     notes.append(f"error: {f.error}")
                 notes += f.notes
-                columns = f.check.columns
-                if opts.scoped:
-                    columns = (*(f.check.scoped_columns or columns), FROM_OWNED)
-                app.ui.table(f"[{f.check.severity}] {f.check.title}", columns, f.rows,
+                app.ui.table(f"[{f.check.severity}] {f.check.title}", self._columns(f, opts), f.rows,
                              max_rows=max_rows, notes=notes)
         if args.output:
-            self.export(args.output, [f.as_dict() for f in findings], _csv_rows(findings))
+            self.export(args.output, [f.as_dict() for f in findings], _csv_rows(findings), names)
+
+    @staticmethod
+    def _columns(finding: Finding, opts: HuntOptions) -> tuple[Column, ...]:
+        if opts.scoped:
+            return (*(finding.check.scoped_columns or finding.check.columns), FROM_OWNED)
+        return finding.check.columns
 
     @staticmethod
     def _scoped_checks(checks: Sequence[Check], explicit: bool) -> list[Check]:

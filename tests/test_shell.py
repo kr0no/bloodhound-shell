@@ -16,6 +16,7 @@ from rich.console import Console
 from bhshell.cli import main
 from bhshell.config import CachedSession, Config
 from bhshell.models.entities import Node
+from bhshell.models.results import Column, ContainerRow
 from bhshell.queries.paths import PathResult, PathService
 from bhshell.render import export, views
 from bhshell.render.views import Renderer
@@ -107,6 +108,59 @@ def test_marked_object_lists(shell: BHShell, mocked: Any) -> None:
     mocked.replace(responses.POST, f"{BASE}api/v2/graphs/cypher", json=graph(["1", "5", "7"], []))
     out = run(shell, "owned list -n 2")
     assert "[3]" in out and "showing 2 of 3 rows" in out and "SVC_SQL@CORP.LOCAL" not in out
+
+
+def test_names_follow_the_table_direction() -> None:
+    inbound = [Column("Principal", "principal"), Column("Right", "edge"), Column("Target", "target")]
+    outbound = [Column("Right", "edge"), Column("Target", "target")]
+    rows = [{"principal": "A", "edge": "GenericAll", "target": "X"},
+            {"principal": "B", "edge": "WriteDacl", "target": "X"},
+            {"principal": "A", "edge": "Owns", "target": "Y"}]
+    assert export.names(inbound, rows) == ["A", "B"]
+    assert export.names(outbound, rows) == ["X", "Y"]
+    assert export.names([Column("OU", "label")], [ContainerRow(name="SERVERS@CORP.LOCAL", kind="OU", depth=1)]) \
+        == ["SERVERS@CORP.LOCAL"]
+    assert export.names([Column("Right", "edge")], rows) == []
+
+
+def test_names_only_for_hunt_and_cypher(shell: BHShell, tmp_path: Path) -> None:
+    run(shell, "login -u admin")
+    shell.stdout = io.StringIO()
+    shell.onecmd_plus_hooks("hunt kerberoastable --names-only")
+    shell.onecmd_plus_hooks("cypher --names-only MATCH (n:User) WHERE n.hasspn = true RETURN n")
+    assert shell.stdout.getvalue() == "JDOE@CORP.LOCAL\nJDOE@DEV.CORP.LOCAL\n" * 2
+    target = tmp_path / "roastable.txt"
+    run(shell, f"cypher -o {target} MATCH (n:User) WHERE n.hasspn = true RETURN n")
+    assert target.read_text() == "JDOE@CORP.LOCAL\nJDOE@DEV.CORP.LOCAL\n"
+
+
+def _owned_selectors(mocked: Any) -> tuple[Any, Any]:
+    tags = mocked.add(responses.GET, f"{BASE}api/v2/asset-group-tags",
+                      json={"data": {"tags": [{"id": 2, "name": "Owned", "type": 3}]}})
+    mocked.add(responses.GET, f"{BASE}api/v2/asset-group-tags/2/selectors", json={"data": {"selectors": []}})
+    post = mocked.add(responses.POST, f"{BASE}api/v2/asset-group-tags/2/selectors", json={"data": {}})
+    return tags, post
+
+
+def test_owned_add_several_names(shell: BHShell, mocked: Any) -> None:
+    tags, post = _owned_selectors(mocked)
+    run(shell, "login -u admin")
+    out = run(shell, "owned add -t user svc_sql jdoe jdoe@corp.local")
+    # jdoe exists in two domains: reported, and the rest still get marked.
+    assert "Added SVC_SQL@CORP.LOCAL" in out and "Added JDOE@CORP.LOCAL" in out and "'jdoe'" in out
+    assert "Marked 2 of 3 (1 failed)." in out
+    assert post.call_count == 2 and tags.call_count == 1
+    assert shell.command_failures == 1
+
+
+def test_owned_add_from_file(shell: BHShell, mocked: Any, tmp_path: Path) -> None:
+    _, post = _owned_selectors(mocked)
+    run(shell, "login -u admin")
+    names = tmp_path / "owned.txt"
+    names.write_text("# cracked on day 2\n\nsvc_sql\n  jdoe@corp.local\nsvc_sql\n")
+    out = run(shell, f"owned add -t user -f {names}")
+    assert "Marked 2 of 2." in out and post.call_count == 2
+    assert "at least one NAME" in run(shell, "owned add")
 
 
 def test_auth_loss_drops_to_disconnected(shell: BHShell, mocked: Any) -> None:

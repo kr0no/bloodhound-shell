@@ -27,8 +27,8 @@ Results go to stdout; status messages, warnings and errors go to stderr, so
 | | `gpo NAME [-l] [-c] [-I]` | GPOs: links, the users and computers they apply to, who can edit them; see [Exploring GPOs](#exploring-gpos) |
 | | `ca NAME [-t] [-I]`, `template NAME [-I]` | AD CS: Enterprise CAs and certificate templates; see [Exploring AD CS](#exploring-ad-cs) |
 | | `search [-t TYPE] [-d DOMAIN] FILTER ...` | List objects matching property filters |
-| Cypher | `cypher [--json] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables, or as rows when it returns values |
-| Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects |
+| Cypher | `cypher [--json \| --names-only] [-o FILE] [-f FILE] QUERY` | Raw Cypher, rendered as node/edge tables, or as rows when it returns values |
+| Marking | `owned list\|add\|remove`, `hvt list\|add\|remove` | Owned and Tier Zero objects; `add` and `remove` take several names or `-f FILE` |
 | Analysis | `path SRC [DST] [--via X ...] [--exclude EDGE] [-g] [-p N]`, `path --owned [DST] [-g] [-p N]` | Attack paths: SRC → DST, SRC → Tier Zero, or everything owned → a target (Tier Zero by default); ordered by fewest actions |
 | | `hunt [CHECK ...] [--all] [--list] [--owned \| --from NAME]` | Domain-wide weakness checks (summary, or details per check), optionally limited to what owned objects can do |
 | | `domains`, `trusts` | Per-domain overview, and the trust map with SID-filtering status |
@@ -61,6 +61,7 @@ delegation, password age, last logon, Tier Zero/owned, ...; risky values are hig
 | `-a, --all` | Summary plus every applicable view (for users and computers this includes `--gpos`) |
 | `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). A per-right count line is always shown |
 | `--json` / `-o FILE.json\|.csv` | Raw JSON output / export (never capped by `--max-rows`) |
+| `--names-only` / `-o FILE.txt` | Only the object names, one per line (see [Feeding other tools](#feeding-other-tools)) |
 
 Rows are coloured by edge severity. `T0` and `owned` mark Tier Zero and owned counterparts, so an
 owned principal with inbound control over a target stands out.
@@ -91,6 +92,34 @@ that contain spaces. `-t` takes any BloodHound type (`User`, `Computer`, `Group`
 `GPO`, `CertTemplate`, ...; default: any), `-c ATTR,...` adds columns, `-l N` caps the results
 fetched (default `max_results`, with a note when there are more) and `-n` the rows shown.
 `--json` prints every property of each match. For OR conditions or relationships, use `cypher`.
+
+### Feeding other tools
+
+`--names-only` prints just the names of the objects a command lists, one per line, and `-o FILE.txt`
+writes the same list to a file. It works with `search`, `hunt`, the entity views, `owned`/`hvt list`,
+`cypher`, `query run` and `domains`. Names are BloodHound's (`ALICE@PHANTOM.CORP`,
+`FILESERVER01.PHANTOM.CORP`), so computers are ready to use as targets and a name is never ambiguous
+across domains. Every row is included, whatever `--max-rows` says.
+
+Which column a table gives depends on its direction: `-I` lists the principals holding the rights,
+`-O` the objects they are held over, an edge check of `hunt` the principals, and a node check the
+objects themselves.
+
+```
+search -t computer enabled -d PHANTOM -o targets.txt     # hosts for netexec
+hunt kerberoastable --names-only                          # roastable users
+bhshell -c "group 'DOMAIN ADMINS' -m --names-only" > da.txt
+```
+
+The same file format goes back in through `owned add -f` and `hvt add -f`: one name per line, with
+blank lines and lines starting with `#` skipped. Names can also be given together
+(`owned add alice bob@phantom.corp`). A name that cannot be resolved is reported and the others are
+still marked:
+
+```
+owned add -f cracked.txt
+owned remove -t user alice bob
+```
 
 ### Exploring OUs
 
@@ -551,7 +580,7 @@ privilege zones are not supported. The object counts of `ou` use aggregate Cyphe
 (`RETURN labels(n), count(n)`); a server that rejects it still gets the views, without counts.
 
 `owned add` / `hvt add` create a selector named `bhshell: <object>` in the Owned label or the
-Tier Zero tier. `remove` only deletes selectors seeded with that object alone, so nothing else
+Tier Zero tier, one per object when several are given. `remove` only deletes selectors seeded with that object alone, so nothing else
 gets unmarked. Changes show up after BH's next analysis run (about a minute): until then a removed
 object still shows as owned, and a second `remove` says so. An object marked by a rule-based
 selector can only be unmarked in the BH UI (Privilege Zones).

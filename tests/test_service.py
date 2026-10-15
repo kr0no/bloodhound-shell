@@ -13,7 +13,7 @@ from bhshell.errors import AmbiguousMatchError, BHError, NotFoundError, Unsuppor
 from bhshell.models.entities import Graph, Node, User, literal_rows
 from bhshell.models.results import ViewResult
 from bhshell.queries import cypher as Q
-from bhshell.queries.marking import MarkingService
+from bhshell.queries.marking import MarkingService, Tag
 from bhshell.queries.service import EntityService, parse_identifier
 from bhshell.shell.commands.cypher import parse_cypher_args
 from tests.conftest import BASE, HELPDESK, IT_ADMINS, JDOE, NODES, SVC_SQL, WS01, graph
@@ -273,7 +273,7 @@ def test_marking_without_asset_group_tags_is_unsupported(client: BHClient,
     mocked.add(responses.GET, f"{BASE}api/v2/asset-group-tags", status=404, body="404 page not found")
     svc = EntityService(client)
     with pytest.raises(UnsupportedFeature):
-        MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned")
+        _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned")
 
 
 def test_owned_add_and_remove(client: BHClient, mocked: responses.RequestsMock) -> None:
@@ -291,11 +291,15 @@ def test_owned_add_and_remove(client: BHClient, mocked: responses.RequestsMock) 
     svc = EntityService(client)
     marking = MarkingService(client, svc)
     node = svc.resolve("svc_sql", "User")
-    marking.mark(node, "owned")
+    _mark(marking, node, "owned")
     assert post.call_count == 1
     assert b'"value": "' + SVC_SQL.encode() in post.calls[0].request.body
-    marking.mark(node, "owned", add=False)
+    _mark(marking, node, "owned", add=False)
     assert delete.call_count == 1
+
+
+def _mark(marking: MarkingService, node: Node, tag: Tag, add: bool = True) -> str:
+    return marking.mark(node, marking.tag(tag), add=add)
 
 
 def _owned_tag(mocked: responses.RequestsMock) -> None:
@@ -319,7 +323,7 @@ def test_owned_remove_keeps_selectors_shared_with_other_objects(client: BHClient
     delete_11 = mocked.add(responses.DELETE, f"{url}/11")
     client.page_size = 2
     svc = EntityService(client)
-    message = MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned", add=False)
+    message = _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned", add=False)
     assert delete_9.call_count == 1 and delete_11.call_count == 0
     assert "Team picks" in message
 
@@ -344,7 +348,7 @@ def test_owned_remove_deletes_every_matching_selector_across_pages(client: BHCli
     mocked.add_callback(responses.DELETE, re.compile(rf"{re.escape(url)}/\d+", re.IGNORECASE), callback=delete)
     client.page_size = 2
     svc = EntityService(client)
-    message = MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned", add=False)
+    message = _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned", add=False)
     assert selectors == [] and "Removed 5 selector(s)" in message
 
 
@@ -356,7 +360,7 @@ def test_owned_add_is_a_no_op_when_a_selector_already_targets_the_object(client:
         {"id": 7, "name": "SVC_SQL@CORP.LOCAL", "seeds": [{"type": 1, "value": SVC_SQL}]}]}})
     post = mocked.add(responses.POST, url, json={"data": {}})
     svc = EntityService(client)
-    message = MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned")
+    message = _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned")
     assert post.call_count == 0
     assert "already in 'Owned' (selector: SVC_SQL@CORP.LOCAL)" in message
 
@@ -372,10 +376,10 @@ def test_hvt_add_and_remove_respect_rule_based_tier_zero(client: BHClient, mocke
     marking = MarkingService(client, svc)
     node = svc.resolve("svc_sql", "User")
     node.tier_zero = True  # selected by a rule (e.g. a group membership), not by a selector naming it
-    assert "already in 'Tier Zero'" in marking.mark(node, "tier0")
+    assert "already in 'Tier Zero'" in _mark(marking, node, "tier0")
     assert post.call_count == 0
     with pytest.raises(BHError, match=r"rule-based selector \(1 in the tag\)"):
-        marking.mark(node, "tier0", add=False)
+        _mark(marking, node, "tier0", add=False)
 
 
 def test_owned_remove_after_its_selector_is_gone_waits_for_analysis(client: BHClient,
@@ -386,7 +390,7 @@ def test_owned_remove_after_its_selector_is_gone_waits_for_analysis(client: BHCl
     svc = EntityService(client)
     node = svc.resolve("svc_sql", "User")
     node.owned = True  # the tag lasts until the next analysis
-    message = MarkingService(client, svc).mark(node, "owned", add=False)
+    message = _mark(MarkingService(client, svc), node, "owned", add=False)
     assert "next analysis" in message
 
 
@@ -398,7 +402,7 @@ def test_owned_add_name_clash_is_explained(client: BHClient, mocked: responses.R
                json={"errors": [{"message": "asset group tag selector name must be unique"}]})
     svc = EntityService(client)
     with pytest.raises(BHError, match="already exists in 'Owned' but does not target"):
-        MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned")
+        _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned")
 
 
 def test_owned_remove_refuses_when_only_shared_selectors_match(client: BHClient,
@@ -409,7 +413,7 @@ def test_owned_remove_refuses_when_only_shared_selectors_match(client: BHClient,
     delete = mocked.add(responses.DELETE, f"{BASE}api/v2/asset-group-tags/2/selectors/11")
     svc = EntityService(client)
     with pytest.raises(BHError, match="Team picks"):
-        MarkingService(client, svc).mark(svc.resolve("svc_sql", "User"), "owned", add=False)
+        _mark(MarkingService(client, svc), svc.resolve("svc_sql", "User"), "owned", add=False)
     assert delete.call_count == 0
 
 

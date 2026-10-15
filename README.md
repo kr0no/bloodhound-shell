@@ -59,7 +59,7 @@ The same commands run non-interactively for scripting: `bhshell -c "hunt --json"
 | `path` | Shortest paths to a target or to Tier Zero, from everything owned, or through `--via` steps; printed as hop chains, a terminal graph, or SVG/PNG for reports |
 | `hunt` | Domain-wide checks by severity: DCSync, control of Tier Zero, AD CS (ESC*), Kerberoasting, privileged sessions, LAPS/gMSA readers, passwords in attributes, takeover primitives (Shadow Credentials, RBCD), GPO control, NTLM relay, trusts, possible honeytokens...; `hunt --owned` limits them to what your owned objects can do |
 | `cypher`, `query` | Raw Cypher, and a library of saved queries: bundled, your own `.cyp` files (`~/.bhshell/queries/` or any folder set with `config query_dirs`) and those saved on the server |
-| `owned`, `hvt` | Mark or unmark owned and Tier Zero objects |
+| `owned`, `hvt` | Mark or unmark owned and Tier Zero objects, by name or from a file of names |
 | `domains`, `trusts` | Per-domain counts, and the trust map with SID filtering status |
 
 To add your own query, save it as a `.cyp` file in `~/.bhshell/queries/` and run it by name:
@@ -76,7 +76,8 @@ MATCH (u:User) WHERE u.admincount = true AND u.enabled = true
 See [Query library](https://github.com/kr0no/bloodhound-shell/blob/main/docs/USAGE.md#query-library) for the format and for
 keeping queries in other folders (a team repository, one folder per engagement).
 
-Most commands take `--json` and `-o FILE` (JSON or CSV). Login works with a password (plus MFA) or
+Most commands take `--json` and `-o FILE` (JSON or CSV), and those that list objects also take
+`--names-only` or `-o FILE.txt` for a plain list of names to hand to other tools. Login works with a password (plus MFA) or
 an API token; secrets are prompted for or read from the environment, never passed as arguments.
 
 ## Documentation

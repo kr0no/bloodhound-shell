@@ -111,16 +111,24 @@ class SearchCommands(BaseCommands):
         for node in result.nodes:
             app.remember(node)
 
+        names = export.node_names(result.nodes)
+        truncated = ""
+        if result.truncated:
+            total = f" of {result.total:,}" if result.total is not None else ""
+            truncated = f"Only the first {opts.limit:,}{total} results were fetched (raise --limit)."
         if args.json:
             app.poutput(export.to_json(result.as_dict()))
+        elif args.names_only:
+            if truncated:
+                app.ui.warn(truncated)
+            self.print_names(names)
         else:
             notes = [f"Filters: {' AND '.join(args.filters)}"] if args.filters else []
-            if result.truncated:
-                total = f" of {result.total:,}" if result.total is not None else ""
-                notes.append(f"Only the first {opts.limit:,}{total} results were fetched (raise --limit).")
+            if truncated:
+                notes.append(truncated)
             app.ui.table(f"Search: {opts.kind or 'any type'}", result.columns, result.rows(),
                          max_rows=self.max_rows(args), notes=notes)
         if args.output:
             fields = [c.attr for c in result.columns]
             fields.insert(3, "objectid")
-            self.export(args.output, result.as_dict(), (fields, result.rows()))
+            self.export(args.output, result.as_dict(), (fields, result.rows()), names)

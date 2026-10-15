@@ -23,9 +23,9 @@ TRUST_COLS = [
 ]
 
 
-def _output_parser(description: str) -> Cmd2ArgumentParser:
+def _output_parser(description: str, *, names: bool = True) -> Cmd2ArgumentParser:
     p = Cmd2ArgumentParser(description=description)
-    add_output_args(p)
+    add_output_args(p, names=names)
     return p
 
 
@@ -53,8 +53,11 @@ class DomainCommands(BaseCommands):
         service = DomainService(app.entities)
         infos = service.domains()
         rows = [d.as_dict() for d in infos]
+        names = [r["name"] for r in rows]
         if args.json:
             app.poutput(export.to_json(rows))
+        elif args.names_only:
+            self.print_names(names)
         else:
             display = [{**r, "users_fmt": _pair(r["users"], r["enabled_users"]),
                         "computers_fmt": _pair(r["computers"], r["enabled_computers"]),
@@ -62,10 +65,10 @@ class DomainCommands(BaseCommands):
             app.ui.table("Domains", DOMAIN_COLS, display, notes=service.notes)
         if args.output:
             fields = list(rows[0]) if rows else ["name"]
-            self.export(args.output, rows, (fields, rows))
+            self.export(args.output, rows, (fields, rows), names)
 
     @with_argparser(lambda: _output_parser(
-        "Domain trusts. 'A trusts B' means principals of B can access resources in A."))
+        "Domain trusts. 'A trusts B' means principals of B can access resources in A.", names=False))
     def do_trusts(self, args: argparse.Namespace) -> None:
         """Domain trust map with SID-filtering status."""
         app = self.app

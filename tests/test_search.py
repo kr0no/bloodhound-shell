@@ -107,6 +107,14 @@ def test_search_command(shell: BHShell, mocked: Any, tmp_path: Path) -> None:
     data = json.loads(shell_json(shell, "search hasspn --json"))
     assert data["count"] == 2 and data["results"][0]["properties"]["samaccountname"] == "jdoe"
 
+    assert shell_json(shell, "search -t user hasspn --names-only") == "JDOE@CORP.LOCAL\nSVC_SQL@CORP.LOCAL\n"
+    names = tmp_path / "users.txt"
+    run(shell, f"search -t user hasspn -o {names}")
+    assert names.read_text() == "JDOE@CORP.LOCAL\nSVC_SQL@CORP.LOCAL\n"
+    failures = shell.command_failures
+    assert shell_json(shell, "search hasspn --json --names-only") == ""  # usage error
+    assert shell.command_failures == failures + 1
+
 
 def shell_json(app: BHShell, line: str) -> str:
     """Run a command and return what it printed with `poutput` (the console only gets tables)."""
