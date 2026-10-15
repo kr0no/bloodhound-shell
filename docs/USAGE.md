@@ -468,6 +468,8 @@ Notes on some checks:
 - `adcs-pki-control` lists write and ownership rights from outside Tier Zero over certificate
   templates (ESC4) and over CA, root CA, AIA CA, NTAuth store and issuance policy objects (ESC5).
   BloodHound only adds an `ADCSESC4` edge when the rest of the chain holds.
+- `adcs-ca-control` (and the `ca` summary) leave out the CA host's own Administrators group, which
+  manages every CA by default; who is in it shows up as the admins of the host in `ca NAME`.
 
 #### From owned objects
 

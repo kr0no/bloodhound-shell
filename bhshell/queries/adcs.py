@@ -64,6 +64,14 @@ def _int(value: Any) -> int | None:
         return None
 
 
+def is_host_admins(principal: Node, ca: Node) -> bool:
+    """The CA host's own Administrators group: it manages every CA by default, and its members already
+    own the CA through the host (GoldenCert), so the ESC7 lists leave it out."""
+    host = str(ca.properties.get("dnshostname") or "").upper()
+    return (principal.kind == "ADLocalGroup" and principal.objectid.endswith("-544") and bool(host)
+            and principal.name.upper().endswith("@" + host))
+
+
 def issued_freely(props: dict[str, Any]) -> bool:
     """Issued without a manager's approval or an enrollment agent's signature (ignored on schema version 1)."""
     if props.get("requiresmanagerapproval") is not False:
@@ -198,7 +206,7 @@ class ADCSService:
         if hosts:
             admins, _ = self.entities.outside_t0({h.objectid for h in hosts}, frozenset({"AdminTo"}))
         enrollers, _ = self.entities.outside_t0({oid}, ENROLL_EDGES)
-        managers, _ = self.entities.outside_t0({oid}, CA_MANAGE_EDGES, rights=True)
+        managers, _ = self.entities.outside_t0({oid}, CA_MANAGE_EDGES, rights=True, skip=is_host_admins)
         # One issuing CA is often three nodes of the same name: its RootCA, AIACA and EnterpriseCA.
         issuers = list(dict.fromkeys(n.name for n in self._linked(oid, ISSUED_SIGNED_BY)))
         if not issuers and len(ca.properties.get("certchain") or []) == 1:

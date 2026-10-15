@@ -21,7 +21,7 @@ from bhshell.errors import ApiError, CypherDisabledError, UnsupportedFeature
 from bhshell.models.entities import BROAD_SIDS, OWNED_LABEL, TIER_ZERO_LABEL, Edge, Graph, Node, last_logon
 from bhshell.models.results import Column
 from bhshell.queries import cypher as Q
-from bhshell.queries.adcs import ANY_PURPOSE, template_escs
+from bhshell.queries.adcs import ANY_PURPOSE, is_host_admins, template_escs
 from bhshell.queries.domains import TRUSTS_QUERY, trusts_from_graph
 from bhshell.queries.edges import (
     ACL_EDGES,
@@ -597,6 +597,11 @@ def _pki_rows(g: Graph, _: HuntOptions) -> list[Row]:
 _PKI_TARGET = "(" + " OR ".join(f"t:{k}" for k in PKI_KINDS) + ")"
 
 
+def _ca_control_rows(g: Graph, o: HuntOptions) -> list[Row]:
+    kept = [e for e in g.edges if not is_host_admins(g.nodes[e.source], g.nodes[e.target])]
+    return _edge_rows(CA_MANAGE_EDGES)(Graph(g.nodes, kept), o)
+
+
 # OPSEC
 
 def _decoys(o: HuntOptions) -> str:
@@ -665,9 +670,10 @@ CHECKS: tuple[Check, ...] = (
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, Column("Technique", "technique"), TARGET, TARGET_KIND, OWNED),
           _pki_rows, fallback=_edge_check(None, _NOT_T0, _PKI_TARGET, dom="t"), scoped=True),
     Check("adcs-ca-control", "Enterprise CA managed from outside Tier Zero (ESC7)", "high",
-          "ManageCA / ManageCertificates on an Enterprise CA held by principals outside Tier Zero.",
+          "ManageCA / ManageCertificates on an Enterprise CA held by principals outside Tier Zero (the CA "
+          "host's own Administrators group, which holds them by default, is left out).",
           _edge_check(CA_MANAGE_EDGES, _NOT_T0, target="EnterpriseCA", dom="t"),
-          (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED), _edge_rows(CA_MANAGE_EDGES), scoped=True),
+          (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED), _ca_control_rows, scoped=True),
     Check("kerberoastable", "Kerberoastable users", "high",
           "Enabled users with an SPN (excluding krbtgt, gMSA and sMSA); those with a path to Tier Zero first, "
           "then RC4, then the oldest passwords.",

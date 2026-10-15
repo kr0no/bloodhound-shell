@@ -295,12 +295,12 @@ class EntityService:
             self._scalars[query] = rows
         return self._scalars[query]
 
-    def outside_t0(self, objectids: set[str], edges: frozenset[str], *,
-                   rights: bool = False) -> tuple[dict[str, list[str]], Graph]:
+    def outside_t0(self, objectids: set[str], edges: frozenset[str], *, rights: bool = False,
+                   skip: Callable[[Node, Node], bool] | None = None) -> tuple[dict[str, list[str]], Graph]:
         """The principals outside Tier Zero holding any of `edges` over each object, and the graph they came from.
 
         Owned principals come first, as `NAME (owned)`; with `rights`, the rights are listed too:
-        `NAME (ManageCA, owned)`.
+        `NAME (ManageCA, owned)`. `skip(principal, object)` leaves a principal out.
         """
         try:
             g = self.run_cypher(Q.controllers_outside_t0(objectids, edges, self.max_results))
@@ -310,6 +310,8 @@ class EntityService:
         for e in g.edges:
             if e.kind in edges and e.source in g.nodes and e.target in g.nodes:
                 src = g.nodes[e.source]
+                if skip and skip(src, g.nodes[e.target]):
+                    continue
                 held = found.setdefault(g.nodes[e.target].objectid, {}).setdefault(src.name, (src.owned, set()))
                 held[1].add(e.kind)
         out: dict[str, list[str]] = {}

@@ -256,6 +256,15 @@ def test_hunt_pki_control_rows_name_the_technique() -> None:
     ]
 
 
+def test_ca_host_administrators_are_not_an_esc7_finding() -> None:
+    host_admins = node("S-1-5-21-1-2-3-1105-544", "ADLocalGroup", "ADMINISTRATORS@CA01.CORP.LOCAL")
+    other_admins = node("S-1-5-21-1-2-3-1200-544", "ADLocalGroup", "ADMINISTRATORS@SRV02.CORP.LOCAL")
+    nodes = {**NODES, "ha": host_admins, "oa": other_admins}
+    edges = [("ha", "ManageCA", "ca"), ("oa", "ManageCA", "ca"), ("jdoe", "ManageCertificates", "ca")]
+    rows = CHECKS_BY_ID["adcs-ca-control"].rows(_graph(nodes, edges), HuntOptions())
+    assert [r["principal"] for r in rows] == ["ADMINISTRATORS@SRV02.CORP.LOCAL", "JDOE@CORP.LOCAL"]
+
+
 def test_hunt_takeover_includes_esc14() -> None:
     rows = CHECKS_BY_ID["object-takeover"].rows(
         _graph(NODES, [("helpdesk", "WriteAltSecurityIdentities", "jdoe")]), HuntOptions())
