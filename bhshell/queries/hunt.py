@@ -343,6 +343,13 @@ _LEGACY_OS_CONDITION = "(" + " OR ".join(
 _PRIVILEGED_USER = f"(u:{TIER_ZERO_LABEL} OR u.admincount = true)"
 _NEVER_LOGGED_ON = ("(n.lastlogon IS NULL OR n.lastlogon <= 0)",
                     "(n.lastlogontimestamp IS NULL OR n.lastlogontimestamp <= 0)")
+# A session is a logon too, even when lastLogonTimestamp has not caught up with it.
+_USER_NEVER_LOGGED_ON = (*_NEVER_LOGGED_ON, f"NOT (n)<-[:{HAS_SESSION}]-()")
+_COMPUTER_NEVER_LOGGED_ON = (*_NEVER_LOGGED_ON, f"NOT (n)-[:{HAS_SESSION}]->()")
+# gMSA / sMSA passwords are long, random and rotated by the domain: never guessable or crackable.
+_NOT_MANAGED = ("(n.gmsa IS NULL OR n.gmsa = false)", "(n.msa IS NULL OR n.msa = false)")
+# Exchange sets random passwords on its health mailbox accounts.
+_NOT_HEALTH_MAILBOX = "NOT toLower(n.samaccountname) STARTS WITH 'healthmailbox'"
 # whencreated > 0 also skips the property-less nodes BloodHound adds for objects it only saw referenced.
 _PWD_DELTA = "(n.pwdlastset - n.whencreated)"
 _PWD_AT_CREATION = (f"(n.whencreated > 0 AND {_PWD_DELTA} < {TZ_MAX + AT_CREATION} "
@@ -425,7 +432,8 @@ def _password_rows(g: Graph, _: HuntOptions) -> list[Row]:
 # Guessable passwords
 
 def _pre2k(o: HuntOptions) -> str:
-    where = Q.where("n.enabled = true", *_NEVER_LOGGED_ON, f"(n.passwordnotreqd = true OR {_PWD_AT_CREATION})",
+    where = Q.where("n.enabled = true", *_COMPUTER_NEVER_LOGGED_ON,
+                    f"(n.passwordnotreqd = true OR {_PWD_AT_CREATION})",
                     o.dom("n"))
     return f"MATCH (n:Computer){where} RETURN n LIMIT {o.limit}"
 
@@ -446,8 +454,8 @@ def _pre2k_rows(g: Graph, _: HuntOptions) -> list[Row]:
 
 def _default_passwords(o: HuntOptions) -> str:
     no_lure = [f"(n.{prop} IS NULL OR n.{prop} = false)" for prop, _ in _LURES]
-    where = Q.where("n.enabled = true", *_NEVER_LOGGED_ON, f"(n.pwdlastset = 0 OR {_PWD_AT_CREATION})", *no_lure,
-                    o.dom("n"))
+    where = Q.where("n.enabled = true", *_USER_NEVER_LOGGED_ON, f"(n.pwdlastset = 0 OR {_PWD_AT_CREATION})", *no_lure,
+                    *_NOT_MANAGED, _NOT_HEALTH_MAILBOX, o.dom("n"))
     # Sorted on the server too, so a truncated list keeps the accounts worth trying.
     return f"MATCH (n:User){where} RETURN n ORDER BY n.pwdlastset = 0 DESC, n.whencreated DESC LIMIT {o.limit}"
 
@@ -583,7 +591,8 @@ _PKI_TARGET = "(" + " OR ".join(f"t:{k}" for k in PKI_KINDS) + ")"
 
 def _decoys(o: HuntOptions) -> str:
     lure = "(" + " OR ".join(f"n.{prop} = true" for prop, _ in _LURES) + ")"
-    where = Q.where("n.enabled = true", lure, *_NEVER_LOGGED_ON, "n.samaccountname <> 'krbtgt'", o.dom("n"))
+    where = Q.where("n.enabled = true", lure, *_USER_NEVER_LOGGED_ON, *_NOT_MANAGED, "n.samaccountname <> 'krbtgt'",
+                    o.dom("n"))
     return f"MATCH (n:User){where} RETURN n LIMIT {o.limit}"
 
 
@@ -650,9 +659,9 @@ CHECKS: tuple[Check, ...] = (
           _edge_check(CA_MANAGE_EDGES, _NOT_T0, target="EnterpriseCA", dom="t"),
           (PRINCIPAL, PRINCIPAL_KIND, EDGE, TARGET, OWNED), _edge_rows(CA_MANAGE_EDGES), scoped=True),
     Check("kerberoastable", "Kerberoastable users", "high",
-          "Enabled users with an SPN (excluding krbtgt); those with a path to Tier Zero first, then RC4, "
-          "then the oldest passwords.",
-          _node_check("User", "n.hasspn = true", "n.enabled = true"),
+          "Enabled users with an SPN (excluding krbtgt, gMSA and sMSA); those with a path to Tier Zero first, "
+          "then RC4, then the oldest passwords.",
+          _node_check("User", "n.hasspn = true", "n.enabled = true", *_NOT_MANAGED),
           (NAME, DOMAIN, PWD, ADMINCOUNT, Column("SPNs", "spns"), ENCTYPES, PATH_T0, T0, OWNED), _user_rows,
           enrich=_path_to_t0),
     Check("asreproast", "AS-REP roastable users", "high",

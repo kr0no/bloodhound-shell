@@ -436,8 +436,13 @@ Notes on some checks:
   Users: the ones constrained delegation, RBCD and S4U can impersonate.
 - `relay` and `ntlm-hardening` rely on the NTLM properties SharpHound collects (`smbsigning`,
   `webclientrunning`, `ldapsigning`, `ldapsepa`). Without them they report nothing.
+- `kerberoastable` leaves out gMSA and sMSA accounts: their passwords are random and rotated by the
+  domain, so their tickets cannot be cracked. `default-passwords` and `decoys` leave them out too.
 - `decoys` lists enabled users that look attractive (SPN, no pre-authentication, adminCount) but
   have never logged on. Check them before roasting or using them.
+- "Never logged on" (`decoys`, `pre2k`, `default-passwords`) means no `lastLogon`, no
+  `lastLogonTimestamp` and no session: a user with a session on a computer, or a computer with users
+  logged on to it, has logged on even if its timestamps have not caught up.
 - `pre2k` lists enabled computers that never logged on and whose password was set when the account
   was created (or is not required). An account created as a pre-Windows 2000 computer keeps its
   lowercase name as password, shown in `Password to try`. Timeroasting tests them all offline.

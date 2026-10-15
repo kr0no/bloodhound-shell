@@ -203,6 +203,18 @@ def test_decoy_rows_list_the_lures() -> None:
     assert rows[0]["lures"] == "SPN, adminCount" and rows[0]["created"] == 1600000000
 
 
+def test_sessions_count_as_logons() -> None:
+    for check in ("decoys", "default-passwords"):
+        assert "NOT (n)<-[:HasSession]-()" in CHECKS_BY_ID[check].query(HuntOptions()), check
+    assert "NOT (n)-[:HasSession]->()" in CHECKS_BY_ID["pre2k"].query(HuntOptions())
+
+
+def test_managed_accounts_are_not_guessed() -> None:
+    for check in ("kerberoastable", "decoys", "default-passwords"):
+        assert "(n.gmsa IS NULL OR n.gmsa = false)" in CHECKS_BY_ID[check].query(HuntOptions()), check
+    assert "STARTS WITH 'healthmailbox'" in CHECKS_BY_ID["default-passwords"].query(HuntOptions())
+
+
 def test_pre2k_rows_give_the_password_to_try() -> None:
     nodes = {"a": node("Computer", "A", "KIOSK01.CORP.LOCAL", samaccountname="KIOSK01$", whencreated=1600000000),
              "b": node("Computer", "B", "RECEPTIONDESK02.CORP.LOCAL", samaccountname="RECEPTIONDESK02$",
