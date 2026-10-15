@@ -13,7 +13,6 @@ from collections.abc import Iterable
 from bhshell.models.entities import TIER_ZERO_LABEL
 from bhshell.queries.edges import (
     CONTAINS,
-    EXEC_EDGES,
     EXTENDED_BY_POLICY,
     GP_LINK,
     HAS_SESSION,
@@ -162,13 +161,6 @@ def incoming_unrolled(objectid: str, edges: Iterable[str] | None, limit: int, sk
     return (
         f"MATCH p=(m:Base)-[:{MEMBER_OF}*1..]->(g:Group)-{_rel(edges)}->(n:Base) "
         f"WHERE n.objectid = {lit(objectid)}{keep} RETURN p LIMIT {limit}"
-    )
-
-
-def exec_rights_inbound_unrolled(objectid: str, limit: int, edges: Iterable[str] = EXEC_EDGES) -> str:
-    return (
-        f"MATCH p=(m:Base)-[:{MEMBER_OF}*1..]->(g:Group)-[r:{edge_types(edges)}]->(c:Computer) "
-        f"WHERE c.objectid = {lit(objectid)} RETURN p LIMIT {limit}"
     )
 
 

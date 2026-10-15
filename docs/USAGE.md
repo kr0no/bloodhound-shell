@@ -55,9 +55,9 @@ delegation, password age, last logon, Tier Zero/owned, ...; risky values are hig
 | `-g, --groups` | Group memberships, direct and nested, with depth and the group it comes through |
 | `-m, --members` | Group members, direct and nested (groups only) |
 | `-O, --outbound` | Dangerous rights held over other objects (ACLs, credential access, delegation, ADCS, relay), direct or inherited through groups |
-| `-I, --inbound` | Principals holding dangerous rights over the object |
+| `-I, --inbound` | Principals holding dangerous rights over the object, and the members of the groups holding them (once each, with the group's strongest right; broad groups such as Domain Users or Everyone are not unrolled) |
 | `-s, --sessions` | `HasSession` (user → computers, computer → users, group → members' sessions) |
-| `-p, --local-admin, --privs` | `AdminTo`, `CanRDP`, `ExecuteDCOM`, `CanPSRemote`, `SQLAdmin`; computers also list who has these rights on them, with group members unrolled |
+| `-p, --local-admin, --privs` | `AdminTo`, `CanRDP`, `ExecuteDCOM`, `CanPSRemote`, `SQLAdmin`; computers also list who has these rights on them, with group members unrolled as for `-I` |
 | `-G, --gpos` | GPOs that apply to the user or computer, and who outside Tier Zero can edit them (see [Exploring OUs](#exploring-ous)) |
 | `-a, --all` | Summary plus every applicable view (for users and computers this includes `--gpos`) |
 | `-n, --max-rows N` | Table rows shown per view (default `display_rows` = 100; `0` = all). A per-right count line is always shown |

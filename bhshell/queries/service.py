@@ -498,45 +498,46 @@ class EntityService:
     def inbound(self, node: Node) -> list[ViewResult]:
         title = "Inbound object control (principals with rights over this object, direct + via groups)"
 
-        def via_cypher() -> list[ViewResult]:
-            oid, limit = node.objectid, self.max_results
-            graphs = [
-                *self._tiered(lambda ks: Q.incoming(oid, ks, limit) if ks else Q.incoming_any(oid, limit),
-                              CONTROL_EDGES),
-                # Members of broad groups (Domain Users, Everyone, ...) are everyone: the group row says it.
-                *self._tiered(lambda ks: Q.incoming_unrolled(oid, ks, limit, BROAD_SIDS), CONTROL_EDGES),
-            ]
-            g = Graph.union(graphs)
-            rows: list[RelationshipRow] = []
-            target = g.find(node.objectid)
-            if target:
-                # Each holding group's most severe right: its members are listed once, with that right.
-                strongest: dict[str, str] = {}
-                for e in g.edges_to([target.id], CONTROL_EDGES):
-                    src = g.nodes[e.source]
-                    rows.append(RelationshipRow(
-                        principal=src.name, principal_kind=src.kind, edge=e.kind, target=node.name,
-                        target_kind=node.kind, via="direct", depth=0, tier_zero=src.tier_zero, owned=src.owned,
-                        objectid=src.objectid,
-                    ))
-                    if src.kind == "Group" and not src.objectid.upper().endswith(BROAD_SIDS):
-                        best = strongest.get(e.source)
-                        if best is None or (severity_rank(e.kind), e.kind) < (severity_rank(best), best):
-                            strongest[e.source] = e.kind
-                for gid, edge in strongest.items():
-                    group = g.nodes[gid]
-                    for mid, (depth, _) in g.bfs(gid, MEMBER_OF, reverse=True).items():
-                        m = g.nodes[mid]
-                        rows.append(RelationshipRow(
-                            principal=m.name, principal_kind=m.kind, edge=edge, target=node.name,
-                            target_kind=node.kind, via=group.name, depth=depth, tier_zero=m.tier_zero,
-                            owned=m.owned, objectid=m.objectid,
-                        ))
-            rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.owned, not r.tier_zero, r.edge,
-                                     r.principal))
-            return [self._capped(ViewResult("inbound", title, INBOUND_COLS, rows), *graphs)]
+        return self._with_fallback(lambda: [self._inbound_view(node, "inbound", title, CONTROL_EDGES)],
+                                   lambda why: self._rest_view(node, "inbound", title, INBOUND_COLS, why))
 
-        return self._with_fallback(via_cypher, lambda why: self._rest_view(node, "inbound", title, INBOUND_COLS, why))
+    def _inbound_view(self, node: Node, key: str, title: str, kinds: frozenset[str]) -> ViewResult:
+        """Principals holding `kinds` over the node, directly or through the groups they belong to."""
+        oid, limit = node.objectid, self.max_results
+        graphs = [
+            *self._tiered(lambda ks: Q.incoming(oid, ks, limit) if ks else Q.incoming_any(oid, limit), kinds),
+            # Members of broad groups (Domain Users, Everyone, ...) are everyone: the group row says it.
+            *self._tiered(lambda ks: Q.incoming_unrolled(oid, ks, limit, BROAD_SIDS), kinds),
+        ]
+        g = Graph.union(graphs)
+        rows: list[RelationshipRow] = []
+        target = g.find(node.objectid)
+        if target:
+            # Each holding group's most severe right: its members are listed once, with that right.
+            strongest: dict[str, str] = {}
+            for e in g.edges_to([target.id], kinds):
+                src = g.nodes[e.source]
+                rows.append(RelationshipRow(
+                    principal=src.name, principal_kind=src.kind, edge=e.kind, target=node.name,
+                    target_kind=node.kind, via="direct", depth=0, tier_zero=src.tier_zero, owned=src.owned,
+                    objectid=src.objectid,
+                ))
+                if src.kind == "Group" and not src.objectid.upper().endswith(BROAD_SIDS):
+                    best = strongest.get(e.source)
+                    if best is None or (severity_rank(e.kind), e.kind) < (severity_rank(best), best):
+                        strongest[e.source] = e.kind
+            for gid, edge in strongest.items():
+                group = g.nodes[gid]
+                for mid, (depth, _) in g.bfs(gid, MEMBER_OF, reverse=True).items():
+                    m = g.nodes[mid]
+                    rows.append(RelationshipRow(
+                        principal=m.name, principal_kind=m.kind, edge=edge, target=node.name,
+                        target_kind=node.kind, via=group.name, depth=depth, tier_zero=m.tier_zero,
+                        owned=m.owned, objectid=m.objectid,
+                    ))
+        rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.owned, not r.tier_zero, r.edge,
+                                 r.principal))
+        return self._capped(ViewResult(key, title, INBOUND_COLS, rows), *graphs)
 
     def sessions(self, node: Node) -> list[ViewResult]:
         titles = {
@@ -578,7 +579,7 @@ class EntityService:
         if node.kind == "Computer":
             in_title = "Principals with execution privileges on this computer (direct + via groups)"
             results += self._with_fallback(
-                lambda: [self._exec_inbound(node, in_title)],
+                lambda: [self._inbound_view(node, "privs_inbound", in_title, EXEC_EDGES)],
                 lambda why: self._rest_view(node, "privs_inbound", in_title, INBOUND_COLS, why),
             )
         return results
@@ -635,33 +636,6 @@ class EntityService:
         rows.sort(key=lambda r: (severity_rank(r.edge), not r.tier_zero, r.depth or 0, r.edge, r.target))
         view.rows = rows
         return self._capped(view, *graphs)
-
-    def _exec_inbound(self, node: Node, title: str) -> ViewResult:
-        oid, limit = node.objectid, self.max_results
-        graphs = [
-            *self._tiered(lambda ks: Q.incoming(oid, ks or EXEC_EDGES, limit), EXEC_EDGES),
-            *self._tiered(lambda ks: Q.exec_rights_inbound_unrolled(oid, limit, ks or EXEC_EDGES), EXEC_EDGES),
-        ]
-        g = Graph.union(graphs)
-        target = g.find(node.objectid)
-        rows: list[RelationshipRow] = []
-        if target:
-            for e in g.edges_to([target.id], EXEC_EDGES):
-                src = g.nodes[e.source]
-                rows.append(RelationshipRow(
-                    principal=src.name, principal_kind=src.kind, edge=e.kind, target=node.name, via="direct",
-                    depth=0, tier_zero=src.tier_zero, owned=src.owned, objectid=src.objectid,
-                ))
-                if src.kind == "Group":
-                    for mid, (depth, _parent) in g.bfs(src.id, MEMBER_OF, reverse=True).items():
-                        m = g.nodes[mid]
-                        rows.append(RelationshipRow(
-                            principal=m.name, principal_kind=m.kind, edge=e.kind, target=node.name,
-                            via=src.name, depth=depth, tier_zero=m.tier_zero, owned=m.owned, objectid=m.objectid,
-                        ))
-        rows.sort(key=lambda r: (severity_rank(r.edge), r.depth or 0, not r.owned, not r.tier_zero, r.edge,
-                                 r.principal))
-        return self._capped(ViewResult("privs_inbound", title, INBOUND_COLS, rows), *graphs)
 
     def _rest_view(self, node: Node, key: str, title: str, columns: list[Column], why: str) -> list[ViewResult]:
         view = ViewResult(key, title, columns, backend="rest")

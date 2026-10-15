@@ -137,6 +137,26 @@ def test_inbound_lists_members_of_holding_groups_once(client: BHClient, monkeypa
     assert any("ENDS WITH '-513'" in q for q in queries)
 
 
+def test_exec_rights_on_a_computer_unroll_groups_like_inbound(client: BHClient,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    svc = EntityService(client)
+    ws01 = svc.resolve("WS01", "Computer")
+    users = {"kind": "Group", "kinds": ["Base", "Group"], "objectId": "S-1-5-21-1000-513",
+             "properties": {"name": "DOMAIN USERS@CORP.LOCAL", "objectid": "S-1-5-21-1000-513"}}
+    nodes = {**NODES, "u": users}
+    held = Graph.from_cypher(graph(["1", "2", "4", "7", "u"], [
+        ("2", "AdminTo", "4"), ("2", "CanRDP", "4"), ("1", "MemberOf", "2"),
+        ("u", "CanRDP", "4"), ("7", "MemberOf", "u")], nodes=nodes)["data"])
+    monkeypatch.setattr(svc, "run_cypher", lambda query: held)
+    rows = svc.view(ws01, "privs")[1].rows
+    assert [(r.principal, r.edge, r.via) for r in rows] == [
+        ("IT ADMINS@CORP.LOCAL", "AdminTo", "direct"),
+        ("JDOE@CORP.LOCAL", "AdminTo", "IT ADMINS@CORP.LOCAL"),
+        ("DOMAIN USERS@CORP.LOCAL", "CanRDP", "direct"),
+        ("IT ADMINS@CORP.LOCAL", "CanRDP", "direct"),
+    ]
+
+
 def test_outbound_falls_back_to_wildcard_query(client: BHClient) -> None:
     svc = EntityService(client)
     node = svc.resolve("svc_sql", "User")

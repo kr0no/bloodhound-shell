@@ -10,6 +10,7 @@ from rich.console import Console
 
 from bhshell.client.client import BHClient
 from bhshell.config import Config
+from bhshell.models.entities import BROAD_SIDS
 from bhshell.queries import cypher as Q
 from bhshell.queries.edges import CONTROL_EDGES, EXEC_EDGES, severity
 from bhshell.shell.app import BHShell
@@ -92,7 +93,7 @@ CYPHER_RESULTS: dict[str, dict[str, Any]] = {
     Q.incoming(JDOE, tier(CONTROL_EDGES, "high"), L): graph(["1", "7"], [("7", "ForceChangePassword", "1")]),
     Q.sessions_of_user(JDOE, L): graph(["1", "4"], [("4", "HasSession", "1")]),
     Q.incoming(WS01, tier(EXEC_EDGES, "critical"), L): graph(["2", "4"], [("2", "AdminTo", "4")]),
-    Q.exec_rights_inbound_unrolled(WS01, L, tier(EXEC_EDGES, "critical")): graph(
+    Q.incoming_unrolled(WS01, tier(EXEC_EDGES, "critical"), L, BROAD_SIDS): graph(
         ["1", "2", "4"], [("1", "MemberOf", "2"), ("2", "AdminTo", "4")]),
     "MATCH (n:Tag_Owned) RETURN n": graph(["7"], []),
 }
