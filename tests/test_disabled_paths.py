@@ -174,3 +174,10 @@ def test_tier_zero_stop_condition_is_dropped_when_rejected(client: BHClient, cyp
                      else (200, ALL))
     result = PathService(EntityService(client), include_disabled=True).to_tier_zero(src())
     assert "n = t OR" not in queries[-1] and result.paths
+
+
+def test_hunt_path_to_tier_zero_skips_disabled_objects_like_path(client: BHClient, cypher: Any) -> None:
+    # Only route: SRC -ForceChangePassword-> MSATASK$ (disabled) -MemberOf-> DA
+    cypher(lambda q: (200, payload(["1", "2", "3"], EDGES[:2])))
+    reach, notes = PathService(EntityService(client)).reaching_tier_zero(["S-1"])
+    assert reach == set() and notes == []

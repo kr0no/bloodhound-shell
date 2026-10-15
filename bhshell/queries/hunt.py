@@ -255,7 +255,7 @@ def _constrained_rows(g: Graph, _: HuntOptions) -> list[Row]:
 
 
 def _dcsync(o: HuntOptions) -> str:
-    return (f"MATCH p=(n:Base)-[:{Q.edge_types(DCSYNC_EDGES)}]->(d:Domain){Q.where(o.scope('n'), o.dom('d'))} "
+    return (f"MATCH p=(n:Base)-[:{Q.edge_types(DCSYNC_EDGES)}]->(d:Domain){Q.where(_NOT_T0, o.scope('n'), o.dom('d'))} "
             f"RETURN p LIMIT {o.limit}")
 
 
@@ -364,6 +364,7 @@ _LURES = (("hasspn", "SPN"), ("dontreqpreauth", "no preauth"), ("admincount", "a
 
 def _path_to_t0(entities: EntityService, rows: list[Row], _: HuntOptions) -> list[str]:
     """Mark the users with a path to Tier Zero, and list them first: their hashes are the ones to crack."""
+    rows.sort(key=lambda r: r["enctypes"] == "AES only")  # stable: keeps the age order
     candidates = [r["objectid"] for r in rows if not r["tier_zero"]]
     if len(candidates) > PATH_ENRICH_MAX:
         return [f"Path to Tier Zero not checked: more than {PATH_ENRICH_MAX} users."]
@@ -373,8 +374,8 @@ def _path_to_t0(entities: EntityService, rows: list[Row], _: HuntOptions) -> lis
         return [f"Path to Tier Zero not checked: {exc}"]
     for r in rows:
         r["path_to_t0"] = r["tier_zero"] or r["objectid"] in reach
-    rows.sort(key=lambda r: (not r["path_to_t0"], r["enctypes"] == "AES only"))  # stable: keeps the age order
-    return notes
+    rows.sort(key=lambda r: not r["path_to_t0"])
+    return [f"Path to Tier Zero: {note}" for note in notes]
 
 
 # Credential exposure

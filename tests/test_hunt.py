@@ -12,6 +12,7 @@ from bhshell.queries.hunt import (
     CHECKS,
     CHECKS_BY_ID,
     SCOPED_CHECKS,
+    Finding,
     HuntOptions,
     HuntService,
     enctypes,
@@ -315,3 +316,12 @@ def test_shell_hunt_owned(shell: BHShell, mocked: responses.RequestsMock) -> Non
     out = run(shell, "hunt dcsync --from helpdesk")
     assert "SVC_SQL@CORP.LOCAL" in out and "From" in out
     assert "Scoped" in run(shell, "hunt --list")
+
+
+def test_summary_counts_rows_unless_the_result_was_cut_off(shell: BHShell) -> None:
+    rows = [{"name": "DCSYNCERS@CORP.LOCAL"}]
+    shell.ui.console.export_text(clear=True)
+    shell.ui.hunt_summary([Finding(CHECKS_BY_ID["dcsync"], rows=rows, total=27),
+                           Finding(CHECKS_BY_ID["adcs"], rows=rows, truncated=True, total=9985)])
+    out = shell.ui.console.export_text(clear=True)
+    assert "~27" not in out and "~9985" in out

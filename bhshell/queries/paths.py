@@ -233,7 +233,10 @@ class PathService:
         result = PathResult("")
         cond = f"s.objectid IN [{', '.join(Q.lit(i) for i in ids)}]"
         graph = self._shortest_to_tier_zero("(s:Base)", cond, result)
-        return {n.objectid for n in graph.nodes.values() if n.objectid in ids}, result.notes
+        # Split into paths as `path` does, so disabled objects and a cut-off result count the same way.
+        self._build(result, graph, ids, lambda n: n.tier_zero)
+        skipped = _skipped_note(result.skipped_disabled) if result.skipped_disabled else None
+        return {p.start.objectid for p in result.paths}, [n for n in result.notes if n != skipped]
 
     def owned_to(self, dst: Node) -> PathResult:
         """Shortest paths from every owned object to `dst` (an objective other than Tier Zero)."""

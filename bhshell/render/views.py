@@ -278,7 +278,7 @@ class Renderer:
         for f in findings:
             if f.error:
                 count = Text("error", style="yellow")
-            elif f.total is not None:
+            elif f.truncated and f.total is not None:
                 count = Text(f"~{f.total}", style="bold")
             else:
                 count = Text(f"{'≥' if f.truncated else ''}{len(f.rows)}",
