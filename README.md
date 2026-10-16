@@ -96,6 +96,7 @@ git clone https://github.com/kr0no/bloodhound-shell.git
 cd bloodhound-shell
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
+pre-commit install
 python -m pytest
 ```
 

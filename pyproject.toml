@@ -51,7 +51,7 @@ Issues = "https://github.com/kr0no/bloodhound-shell/issues"
 Author = "https://kr0no.me"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "responses>=0.25"]
+dev = ["pytest>=8.0", "responses>=0.25", "ruff==0.17.0", "pre-commit>=4.0"]
 
 [project.scripts]
 bhshell = "bhshell.cli:main"
