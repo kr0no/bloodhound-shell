@@ -17,6 +17,8 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # setuptools-scm reads the version from the git tags
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -24,7 +26,6 @@ jobs:
       - run: ruff check bhshell tests
       - run: pytest
 
-  # Pushing a tag like v0.2.0 publishes that commit to PyPI, once every test job has passed.
   publish:
     needs: test
     if: startsWith(github.ref, 'refs/tags/v')
@@ -34,15 +35,10 @@ jobs:
       id-token: write  # PyPI trusted publishing: no API token is stored anywhere
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # setuptools-scm reads the version from the git tags
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
-      - name: Check the tag matches bhshell.__version__
-        run: |
-          version=$(python -c "import bhshell; print(bhshell.__version__)")
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match bhshell.__version__ ($version)"
-            exit 1
-          fi
       - run: pip install build && python -m build
       - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,0 +1,2 @@
+# Lets setuptools-scm find the version in GitHub zip/tarball downloads.
+.git_archival.txt export-subst
