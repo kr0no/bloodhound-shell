@@ -1,0 +1,42 @@
+version: 2
+
+# One grouped PR per ecosystem each week. A new release has to be out for a week before it is
+# proposed, so a compromised version is more likely to be yanked before it reaches the repo.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  # Only touches a requirement when the new version falls outside it: the ruff pin, or a cap like
+  # cmd2<5. Lower bounds such as rich>=13.0 are left alone so users are not forced to upgrade.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: increase-if-necessary
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: build
+
+  # Bumps the ruff rev in .pre-commit-config.yaml. The pip entry above bumps the ruff pin in
+  # pyproject.toml in its own PR; merge both so they stay on the same version.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
