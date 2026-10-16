@@ -100,7 +100,15 @@ pre-commit install
 python -m pytest
 ```
 
-The tests mock the BloodHound API with `responses`, so no BloodHound server is needed.
+Without a server, `pytest` runs only the offline tests. The rest run against a BloodHound CE
+instance loaded with the [sample data](https://bloodhound.specterops.io/get-started/quickstart/ce-ingest-sample-data):
+
+```bash
+export BHSHELL_TEST_URL=http://127.0.0.1:8080 BH_USER=admin BH_PASSWORD='...'
+python -m pytest -m live
+```
+
+They only read from the server and never touch `~/.bhshell`.
 
 ## License
 

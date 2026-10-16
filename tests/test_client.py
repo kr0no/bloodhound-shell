@@ -1,30 +1,34 @@
+"""Transport and auth failures that the lab server can't be made to produce on demand."""
+
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
-import json
 import threading
 import time
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import pytest
 import requests
 import responses
+from cmd2.string_utils import strip_style, stylize
 
 from bhshell.client.auth import HMACAuth
-from bhshell.client.client import BHClient, jwt_claims, normalize_url
-from bhshell.errors import (
-    AuthError,
-    ConnectionFailed,
-    CypherDisabledError,
-    LoginFailed,
-    MFARequired,
-    NotAuthenticated,
-)
-from tests.conftest import BASE
+from bhshell.client.client import BHClient, normalize_url
+from bhshell.config import CachedSession, Config
+from bhshell.errors import AuthError, ConnectionFailed, CypherDisabledError, LoginFailed, MFARequired
+from bhshell.queries.service import EntityService
+from bhshell.shell.app import BHShell
+from tests.conftest import BASE, TOKEN, run
+
+
+def connected(app: BHShell) -> bool:
+    """Read the auth state from the prompt colour ("shell" is green when authenticated, red otherwise)."""
+    assert strip_style(app.prompt) == "[bh: shell] > "
+    return stylize("shell", "green") in app.prompt
 
 
 @pytest.mark.parametrize("raw, expected", [
@@ -58,15 +62,6 @@ def test_hmac_signature_matches_reference_algorithm() -> None:
     assert req.headers["Signature"] == expected
 
 
-def test_login_sets_jwt(mocked: responses.RequestsMock) -> None:
-    c = BHClient(BASE)
-    c.login("admin", "pw")
-    assert c.auth_mode == "jwt" and c.username == "admin"
-    assert jwt_claims(c.jwt)["exp"] == 9999999999
-    body = json.loads(mocked.calls[-1].request.body)
-    assert body == {"login_method": "secret", "username": "admin", "secret": "pw"}
-
-
 def test_login_detects_mfa() -> None:
     with responses.RequestsMock() as rsps:
         rsps.add(responses.POST, f"{BASE}api/v2/login", status=400,
@@ -75,72 +70,44 @@ def test_login_detects_mfa() -> None:
             BHClient(BASE).login("admin", "pw")
 
 
-def test_unauthenticated_request_is_refused_locally() -> None:
-    with pytest.raises(NotAuthenticated):
-        BHClient(BASE).self_info()
-
-
-def test_401_maps_to_auth_error(client: BHClient, mocked: responses.RequestsMock) -> None:
-    mocked.replace(responses.GET, f"{BASE}api/v2/self", status=401,
-                   json={"errors": [{"message": "token expired"}]})
-    with pytest.raises(AuthError, match="token expired"):
-        client.self_info()
-
-
-def test_cypher_empty_404_is_empty_graph(client: BHClient) -> None:
-    assert client.cypher("MATCH (n:Nope) RETURN n") == {"nodes": {}, "edges": [], "literals": []}
-
-
-def test_cypher_missing_endpoint_is_disabled() -> None:
+def test_failed_login_keeps_the_previous_session() -> None:
     with responses.RequestsMock() as rsps:
-        rsps.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
+        rsps.add(responses.POST, f"{BASE}api/v2/login", status=401, json={"errors": [{"message": "bad creds"}]})
         c = BHClient(BASE)
-        c.set_jwt("t")
-        with pytest.raises(CypherDisabledError):
-            c.cypher("MATCH (n) RETURN n")
+        c.set_jwt("old-token", "admin")
+        with pytest.raises(LoginFailed):
+            c.login("other", "wrong")
+        assert c.jwt == "old-token" and c.username == "admin"
 
 
-def test_connection_error() -> None:
-    c = BHClient("http://127.0.0.1:1/", timeout=(0.5, 0.5))
-    c.set_jwt("t")
-    with responses.RequestsMock() as rsps:
-        rsps.add(responses.GET, "http://127.0.0.1:1/api/v2/self", body=requests.exceptions.ConnectionError())
-        with pytest.raises(ConnectionFailed):
-            c.self_info()
+def test_401_maps_to_auth_error(mocked: responses.RequestsMock) -> None:
+    mocked.replace(responses.GET, f"{BASE}api/v2/self", status=401, json={"errors": [{"message": "token expired"}]})
+    c = BHClient(BASE)
+    c.set_jwt(TOKEN, "admin")
+    with pytest.raises(AuthError, match="token expired"):
+        c.self_info()
 
 
-def test_requests_run_inside_the_waiting_hook(client: BHClient) -> None:
-    labels: list[str] = []
-
-    @contextmanager
-    def waiting(label: str):
-        labels.append(label)
-        yield
-
-    client.waiting = waiting
-    client.cypher("MATCH (n:Nope) RETURN n")
-    client.self_info()
-    assert labels == ["Running Cypher query", "Waiting for BH.test:8080"]
-    labels.clear()
-    for _ in client.steps(["a", "b"]):
-        client.cypher("MATCH (n:Nope) RETURN n")
-    for _ in client.steps(["only"]):
-        client.cypher("MATCH (n:Nope) RETURN n")
-    client.self_info()
-    assert labels == ["Running Cypher query (1/2)", "Running Cypher query (2/2)", "Running Cypher query",
-                      "Waiting for BH.test:8080"]
+def test_expired_session_drops_the_shell_to_disconnected(shell: BHShell, mocked: Any) -> None:
+    run(shell, "login -u admin")
+    mocked.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=401,
+               json={"errors": [{"message": "session expired"}]})
+    assert "session expired" in run(shell, "user jdoe")
+    assert not connected(shell)
 
 
-def test_paginate_follows_skip() -> None:
-    with responses.RequestsMock() as rsps:
-        c = BHClient(BASE, page_size=2)
-        c.set_jwt("t")
-        url = f"{BASE}api/v2/users/X/sessions"
-        rsps.add(responses.GET, url, json={"count": 3, "data": [{"n": 1}, {"n": 2}]},
-                 match=[responses.matchers.query_param_matcher({"skip": "0", "limit": "2", "type": "list"})])
-        rsps.add(responses.GET, url, json={"count": 3, "data": [{"n": 3}]},
-                 match=[responses.matchers.query_param_matcher({"skip": "2", "limit": "2", "type": "list"})])
-        assert [i["n"] for i in c.entity_related("User", "X", "sessions")] == [1, 2, 3]
+def test_resumed_session_survives_a_server_error(shell: BHShell, mocked: Any) -> None:
+    run(shell, "login -u admin")
+    mocked.replace(responses.GET, f"{BASE}api/v2/self", status=502, body="Bad Gateway")
+    assert BHShell(Config(url=BASE)).client.is_authenticated
+
+
+def test_failed_relogin_keeps_the_shell_connected(shell: BHShell, mocked: Any) -> None:
+    run(shell, "login -u admin")
+    mocked.replace(responses.POST, f"{BASE}api/v2/login", status=401, json={"errors": [{"message": "bad"}]})
+    assert "Login failed" in run(shell, "login -u someone")
+    assert shell.client.is_authenticated and connected(shell)
+    assert CachedSession.load() is not None
 
 
 def test_slow_post_is_sent_once_and_reported_as_timeout() -> None:
@@ -167,33 +134,35 @@ def test_slow_post_is_sent_once_and_reported_as_timeout() -> None:
         server.shutdown()
 
 
-def test_failed_login_raises_login_failed_and_keeps_session() -> None:
+def test_missing_cypher_endpoint_means_cypher_is_disabled() -> None:
     with responses.RequestsMock() as rsps:
-        rsps.add(responses.POST, f"{BASE}api/v2/login", status=401, json={"errors": [{"message": "bad creds"}]})
+        rsps.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
         c = BHClient(BASE)
-        c.set_jwt("old-token", "admin")
-        with pytest.raises(LoginFailed):
-            c.login("other", "wrong")
-        assert c.jwt == "old-token" and c.username == "admin"
-
-
-def test_auth_state_round_trip() -> None:
-    c = BHClient(BASE)
-    c.set_jwt("jwt", "admin")
-    state = c.auth_state()
-    c.set_hmac("id", "key")
-    c.restore_auth(state)
-    assert (c.auth_mode, c.jwt, c.username, c.token_id) == ("jwt", "jwt", "admin", "")
-
-
-def test_paginate_stops_on_empty_page_despite_count() -> None:
-    with responses.RequestsMock() as rsps:
-        c = BHClient(BASE, page_size=2)
         c.set_jwt("t")
-        url = f"{BASE}api/v2/saved-queries"
-        rsps.add(responses.GET, url, json={"count": 50, "data": []})
-        assert list(c.paginate("api/v2/saved-queries")) == []
-        assert len(rsps.calls) == 1
+        with pytest.raises(CypherDisabledError):
+            c.cypher("MATCH (n) RETURN n")
+
+
+def test_lookup_falls_back_to_rest_when_cypher_is_disabled() -> None:
+    user, group = "S-1-5-21-1000-1104", "S-1-5-21-1000-1200"
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add(responses.POST, f"{BASE}api/v2/graphs/cypher", status=404, body="404 page not found")
+        rsps.add(responses.GET, f"{BASE}api/v2/search",
+                 json={"data": [{"objectid": user, "type": "User", "name": "JDOE@CORP.LOCAL"}]})
+        rsps.add(responses.GET, f"{BASE}api/v2/users/{user}",
+                 json={"data": {"props": {"name": "JDOE@CORP.LOCAL", "objectid": user, "domain": "CORP.LOCAL",
+                                          "hasspn": True}}})
+        rsps.add(responses.GET, f"{BASE}api/v2/users/{user}/memberships",
+                 json={"count": 1, "data": [{"objectID": group, "name": "IT ADMINS@CORP.LOCAL", "label": "Group"}]})
+        client = BHClient(BASE)
+        client.set_jwt("t")
+        svc = EntityService(client)
+        node = svc.resolve("jdoe", "User")
+        assert svc.cypher_available is False
+        assert node.properties["hasspn"] is True
+        view = svc.groups(node)[0]
+        assert view.backend == "rest"
+        assert [r.target for r in view.rows] == ["IT ADMINS@CORP.LOCAL"]
 
 
 def test_paginate_trusts_count_when_server_caps_page_size() -> None:

@@ -68,3 +68,6 @@ bhshell = ["library/*.cyp"]
 
 [tool.ruff]
 line-length = 120
+
+[tool.pytest.ini_options]
+markers = ["live: needs a BloodHound server with the sample data (BHSHELL_TEST_URL)"]

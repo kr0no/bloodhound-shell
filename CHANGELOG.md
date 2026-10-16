@@ -5,6 +5,9 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- `test`: refactored tests to run agains the BloodHound sample data.
+
 ## [0.3.0] - 2026-10-16
 
 ### Added
