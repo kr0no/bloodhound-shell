@@ -41,9 +41,11 @@ from bhshell.shell.commands.search import SearchCommands
 BANNER = rf"""
   _     _         _          _ _
  | |__ | |__  ___| |__   ___| | |
- | '_ \| '_ \/ __| '_ \ / _ \ | |   BloodHound interactive shell v{__version__}
- | |_) | | | \__ \ | | |  __/ | |   Type 'help' for commands, 'help <command>' for details.
- |_.__/|_| |_|___/_| |_|\___|_|_|
+ | '_ \| '_ \/ __| '_ \ / _ \ | |   bhshell v{__version__}
+ | |_) | | | \__ \ | | |  __/ | |   Maintained by kr0no
+ |_.__/|_| |_|___/_| |_|\___|_|_|   https://github.com/kr0no/bloodhound-shell
+
+ Type 'help' for commands, 'help <command>' for details.
 """
 
 # Built-in cmd2 commands that are not useful here.
