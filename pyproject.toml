@@ -48,6 +48,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/kr0no/bloodhound-shell"
 Issues = "https://github.com/kr0no/bloodhound-shell/issues"
+Changelog = "https://github.com/kr0no/bloodhound-shell/blob/main/CHANGELOG.md"
 Author = "https://kr0no.me"
 
 [project.optional-dependencies]
