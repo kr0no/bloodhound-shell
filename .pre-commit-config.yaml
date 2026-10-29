@@ -1,6 +1,6 @@
 # Same ruff version as the dev extra in pyproject.toml; bump both together.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.0
+    rev: v0.17.1
     hooks:
       - id: ruff-check
